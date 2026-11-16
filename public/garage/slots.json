@@ -1,0 +1,236 @@
+[
+  {
+    "slot": "foam-cannon",
+    "kind": "foam_cannon",
+    "object": "slot_foam-cannon",
+    "position": [
+      -1.3,
+      0.92,
+      -3.02
+    ],
+    "rotationY": 0.5,
+    "hotspotOffsetY": 0.3,
+    "model": null
+  },
+  {
+    "slot": "foam-master",
+    "kind": "pump_foamer",
+    "object": "slot_foam-master",
+    "position": [
+      -0.9,
+      0.92,
+      -3.1
+    ],
+    "rotationY": -0.3,
+    "hotspotOffsetY": 0.4,
+    "model": null
+  },
+  {
+    "slot": "towels",
+    "kind": "towel_stack",
+    "object": "slot_towels",
+    "position": [
+      -0.2,
+      0.92,
+      -3.0
+    ],
+    "rotationY": 0.12,
+    "hotspotOffsetY": 0.2,
+    "model": null
+  },
+  {
+    "slot": "leather",
+    "kind": "spray_bottle",
+    "object": "slot_leather",
+    "position": [
+      0.37,
+      0.92,
+      -3.04
+    ],
+    "rotationY": -0.2,
+    "hotspotOffsetY": 0.34,
+    "model": "12oz-spray-bottle.obj"
+  },
+  {
+    "slot": "boar-brush",
+    "kind": "detail_brush",
+    "object": "slot_boar-brush",
+    "position": [
+      -1.55,
+      1.895,
+      -3.33
+    ],
+    "rotationY": 0.0,
+    "hotspotOffsetY": -0.1,
+    "model": null
+  },
+  {
+    "slot": "wheel-brush",
+    "kind": "wheel_brush",
+    "object": "slot_wheel-brush",
+    "position": [
+      -1.01,
+      1.955,
+      -3.33
+    ],
+    "rotationY": 0.0,
+    "hotspotOffsetY": -0.17,
+    "model": null
+  },
+  {
+    "slot": "mf-wheel-brush",
+    "kind": "wheel_brush",
+    "object": "slot_mf-wheel-brush",
+    "position": [
+      -0.75,
+      1.955,
+      -3.33
+    ],
+    "rotationY": 0.0,
+    "hotspotOffsetY": -0.17,
+    "model": null
+  },
+  {
+    "slot": "tire-brush",
+    "kind": "tire_brush",
+    "object": "slot_tire-brush",
+    "position": [
+      -0.45,
+      1.875,
+      -3.33
+    ],
+    "rotationY": 0.0,
+    "hotspotOffsetY": -0.12,
+    "model": null
+  },
+  {
+    "slot": "ceramic-detail",
+    "kind": "spray_bottle",
+    "object": "slot_ceramic-detail",
+    "position": [
+      0.2,
+      1.5525,
+      -3.27
+    ],
+    "rotationY": 0.15,
+    "hotspotOffsetY": 0.34,
+    "model": "12oz-spray-bottle.obj"
+  },
+  {
+    "slot": "graphene",
+    "kind": "spray_bottle",
+    "object": "slot_graphene",
+    "position": [
+      0.5,
+      1.5525,
+      -3.27
+    ],
+    "rotationY": 0.0,
+    "hotspotOffsetY": 0.34,
+    "model": "12oz-spray-bottle.obj"
+  },
+  {
+    "slot": "ceramic-wash",
+    "kind": "spray_bottle",
+    "object": "slot_ceramic-wash",
+    "position": [
+      0.8,
+      1.5525,
+      -3.27
+    ],
+    "rotationY": -0.15,
+    "hotspotOffsetY": 0.34,
+    "model": "12oz-spray-bottle.obj"
+  },
+  {
+    "slot": "wash-mitt",
+    "kind": "wash_mitt",
+    "object": "slot_wash-mitt",
+    "position": [
+      -2.18,
+      0.0,
+      -3.2
+    ],
+    "rotationY": 0.6,
+    "hotspotOffsetY": 1.36,
+    "model": null
+  },
+  {
+    "slot": "iron-remover",
+    "kind": "spray_bottle",
+    "object": "slot_iron-remover",
+    "position": [
+      -2.26,
+      1.1975,
+      -2.27
+    ],
+    "rotationY": 1.5708,
+    "hotspotOffsetY": 0.34,
+    "model": "12oz-spray-bottle.obj"
+  },
+  {
+    "slot": "bug-tar",
+    "kind": "spray_bottle",
+    "object": "slot_bug-tar",
+    "position": [
+      -2.26,
+      1.1975,
+      -1.95
+    ],
+    "rotationY": 1.5708,
+    "hotspotOffsetY": 0.34,
+    "model": "12oz-spray-bottle.obj"
+  },
+  {
+    "slot": "tire-cleaner",
+    "kind": "spray_bottle",
+    "object": "slot_tire-cleaner",
+    "position": [
+      -2.26,
+      1.1975,
+      -1.63
+    ],
+    "rotationY": 1.5708,
+    "hotspotOffsetY": 0.34,
+    "model": "12oz-spray-bottle.obj"
+  },
+  {
+    "slot": "tire-dressing",
+    "kind": "spray_bottle",
+    "object": "slot_tire-dressing",
+    "position": [
+      -2.26,
+      1.1975,
+      -1.31
+    ],
+    "rotationY": 1.5708,
+    "hotspotOffsetY": 0.34,
+    "model": "12oz-spray-bottle.obj"
+  },
+  {
+    "slot": "xc-wash",
+    "kind": "jug",
+    "object": "slot_xc-wash",
+    "position": [
+      -2.26,
+      1.1975,
+      -0.89
+    ],
+    "rotationY": 1.5708,
+    "hotspotOffsetY": 0.32,
+    "model": null
+  },
+  {
+    "slot": "blower",
+    "kind": "blower",
+    "object": "slot_blower",
+    "position": [
+      2.08,
+      0.93,
+      -1.15
+    ],
+    "rotationY": -1.3208,
+    "hotspotOffsetY": 0.34,
+    "model": null
+  }
+]

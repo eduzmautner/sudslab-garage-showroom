@@ -1,0 +1,105 @@
+{% comment %}
+  SudsLab Virtual Garage — full-width 3D showroom section.
+
+  Install:
+    1. `npm run build`, then upload dist/sudslab-showroom.js and
+       dist/sudslab-showroom.css to the theme's /assets folder.
+    2. Add this file to /sections and place "Virtual garage" on a page in the
+       theme editor.
+    3. Each block assigns a store product to a fixed spot ("slot") in the 3D
+       scene. Price, image, link and variant come live from the product.
+{% endcomment %}
+
+{{ 'sudslab-showroom.css' | asset_url | stylesheet_tag }}
+
+<div
+  data-sudslab-showroom
+  style="--sl-height: min({{ section.settings.height_desktop }}vh, 820px);"
+  {{ section.shopify_attributes }}
+>
+  <script type="application/json">
+    [
+      {%- assign first = true -%}
+      {%- for block in section.blocks -%}
+        {%- assign product = block.settings.product -%}
+        {%- if product == blank -%}{%- continue -%}{%- endif -%}
+        {%- unless first -%},{%- endunless -%}
+        {%- assign first = false -%}
+        {
+          "slot": {{ block.settings.slot | json }},
+          "handle": {{ product.handle | json }},
+          "title": {{ block.settings.title | default: product.title | json }},
+          "price": {{ product.selected_or_first_available_variant.price | divided_by: 100.0 | json }},
+          "variantId": {{ product.selected_or_first_available_variant.id | json }},
+          "image": {{ product.featured_image | image_url: width: 1200 | prepend: 'https:' | json }},
+          "url": {{ product.url | json }},
+          "bullets": {{ block.settings.bullets | newline_to_br | split: '<br />' | json }}
+        }
+      {%- endfor -%}
+    ]
+  </script>
+</div>
+
+<script type="module" src="{{ 'sudslab-showroom.js' | asset_url }}"></script>
+
+{% schema %}
+{
+  "name": "Virtual garage",
+  "tag": "section",
+  "class": "section-virtual-garage",
+  "settings": [
+    {
+      "type": "range",
+      "id": "height_desktop",
+      "label": "Height (% of screen)",
+      "min": 50,
+      "max": 100,
+      "step": 2,
+      "default": 74
+    }
+  ],
+  "blocks": [
+    {
+      "type": "hotspot",
+      "name": "Product hotspot",
+      "settings": [
+        {
+          "type": "select",
+          "id": "slot",
+          "label": "Spot in the garage",
+          "default": "foam-cannon",
+          "options": [
+            { "value": "foam-cannon", "label": "Bench — foam cannon" },
+            { "value": "foam-master", "label": "Bench — pump foamer" },
+            { "value": "towels", "label": "Bench — towel stack" },
+            { "value": "leather", "label": "Bench — spray bottle" },
+            { "value": "ceramic-detail", "label": "Pegboard shelf — bottle 1" },
+            { "value": "graphene", "label": "Pegboard shelf — bottle 2" },
+            { "value": "ceramic-wash", "label": "Pegboard shelf — bottle 3" },
+            { "value": "boar-brush", "label": "Pegboard — detailing brush" },
+            { "value": "wheel-brush", "label": "Pegboard — wheel brush" },
+            { "value": "mf-wheel-brush", "label": "Pegboard — microfiber wheel brush" },
+            { "value": "tire-brush", "label": "Pegboard — tire brush" },
+            { "value": "wash-mitt", "label": "Corner — extendable wash mitt" },
+            { "value": "iron-remover", "label": "Wall shelf — bottle 1" },
+            { "value": "bug-tar", "label": "Wall shelf — bottle 2" },
+            { "value": "tire-cleaner", "label": "Wall shelf — bottle 3" },
+            { "value": "tire-dressing", "label": "Wall shelf — bottle 4" },
+            { "value": "xc-wash", "label": "Wall shelf — jug" },
+            { "value": "blower", "label": "Tool chest — blower" }
+          ]
+        },
+        { "type": "product", "id": "product", "label": "Product" },
+        { "type": "text", "id": "title", "label": "Short title (optional)" },
+        {
+          "type": "textarea",
+          "id": "bullets",
+          "label": "Highlights",
+          "info": "One per line, up to three."
+        }
+      ]
+    }
+  ],
+  "presets": [{ "name": "Virtual garage" }]
+}
+{% endschema %}

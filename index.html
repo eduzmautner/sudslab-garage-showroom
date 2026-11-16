@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SudsLab Virtual Garage — prototype</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* Stand-in for the storefront page around the section (not part of the build). */
+    body { margin: 0; background: #121212; color: #fff; font-family: Figtree, system-ui, sans-serif; }
+    .demo-header { height: 72px; background: #000; display: flex; align-items: center; gap: 40px; padding: 0 32px; }
+    .demo-logo { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
+    .demo-logo b { color: #ff5b00; font-weight: 700; }
+    .demo-nav { display: flex; gap: 28px; margin: 0 auto; font-weight: 500; font-size: 15px; }
+    .demo-intro { text-align: center; padding: 44px 20px 30px; }
+    .demo-intro h1 { margin: 0 0 8px; font-size: clamp(28px, 4vw, 40px); font-weight: 500; }
+    .demo-intro p { margin: 0; color: rgba(255, 255, 255, 0.62); font-size: 16px; }
+    .demo-after { padding: 60px 20px 120px; text-align: center; color: rgba(255, 255, 255, 0.5); }
+    @media (max-width: 720px) { .demo-nav { display: none; } }
+  </style>
+</head>
+<body>
+  <header class="demo-header">
+    <div class="demo-logo">suds.<b>lab</b></div>
+    <nav class="demo-nav"><span>New</span><span>Deals</span><span>Interior</span><span>Exterior</span><span>Tire Care</span><span>Ceramic</span><span>Accessories</span></nav>
+  </header>
+  <section class="demo-intro">
+    <h1>Step into the garage</h1>
+    <p>Look around, tap a product, and add it to your kit.</p>
+  </section>
+
+  <div data-sudslab-showroom></div>
+
+  <section class="demo-after">The rest of the page continues below the showroom.</section>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
