@@ -25,7 +25,7 @@ PI = math.pi
 W, D, H = 4.8, 6.8, 2.85            # interior width, depth, height
 DOOR_W, DOOR_H, DOOR_OPEN = 3.0, 2.35, 0.75
 HW, HD = W / 2, D / 2
-SUN_ELEV, SUN_AZIM = math.radians(21), math.radians(30)
+SUN_ELEV, SUN_AZIM = math.radians(15), math.radians(20)   # = Blender sun rotation X 75, Z 20
 EYE = 1.5
 
 # ---------------------------------------------------------------- scene reset
@@ -193,7 +193,7 @@ M = dict(
     ceiling=wood('Ceiling boards', '#9a6e3c', '#c39760', 'y', 0.7),
     joist=wood('Joist', '#855a2b', '#b0824a', 'x', 0.7),
     bench_top=wood('Bench top', '#a8743a', '#d6a463', 'x', 0.45),
-    bench_leg=wood('Bench frame', '#9c6a33', '#c99557', 'z', 0.55),
+    bench_leg=plain('Bench frame metal', '#3b3e43', 0.5),
     shelf=wood('Shelf wood', '#a06f38', '#cf9c5e', 'y', 0.5),
     peg=pegboard_mat('Pegboard'),
     steel=plain('Steel', '#a4a6a8', 0.35, 1.0),
@@ -569,7 +569,7 @@ for sx in (-1, 1):
     for sz in (-1, 1):
         box(f'Bench leg {k}', 0.09, BH - 0.06, 0.09, M['bench_leg'], bench, sx * (BW / 2 - 0.09), (BH - 0.06) / 2, sz * (BD / 2 - 0.07), bevel=0.006)
         k += 1
-box('Bench lower shelf', BW - 0.12, 0.035, BD - 0.1, M['bench_top'], bench, 0, 0.2, 0)
+box('Bench lower shelf', BW - 0.12, 0.035, BD - 0.1, M['bench_leg'], bench, 0, 0.2, 0)
 for sx, n in ((-1, 'L'), (1, 'R')):
     box(f'Bench stretcher {n}', 0.05, 0.09, BD - 0.2, M['bench_leg'], bench, sx * (BW / 2 - 0.09), 0.16, 0)
 cab = empty('Drawer cabinet', bench, -0.75, 0.22, 0)
@@ -582,11 +582,11 @@ use('Props')
 box('Tote', 0.55, 0.3, 0.4, M['black'], bench, 0.55, 0.37, 0, bevel=0.025)
 box('Tote lid', 0.57, 0.03, 0.42, M['orange'], bench, 0.55, 0.535, 0, bevel=0.01)
 box('Bench carton', 0.34, 0.26, 0.3, M['cardboard'], bench, 1.12, 0.35, 0.02, ry=0.08, bevel=0.003)
+use('Live props')        # solid-colour props: not baked, lit live in the browser like the products
 bk = empty('Bench bucket', bench, 1.2, BH, -0.05)
 cyl('Bench bucket body', 0.15, 0.12, 0.27, M['orange'], bk, 0, 0.135, 0, seg=36)
 cyl('Bench bucket rim', 0.155, 0.155, 0.015, M['orange'], bk, 0, 0.27, 0, seg=36)
 # a little bench-top life: rag, tape measure, spray-trigger-free clutter
-use('Live props')        # solid-colour props: not baked, lit live in the browser like the products
 box('Bench rag', 0.22, 0.012, 0.16, M['grey_cloth'], bench, -1.25, BH + 0.006, 0.14, ry=0.4, bevel=0.005)
 use('Props')
 box('Tape measure', 0.07, 0.07, 0.035, M['orange'], bench, 0.42, BH + 0.035, 0.2, ry=0.5, bevel=0.012)
@@ -720,9 +720,15 @@ CART_ROT = PI / 2
 reel = empty('Hose reel', None, -HW, 1.15, 1.55)
 box('Reel plate', 0.03, 0.34, 0.3, M['dark_steel'], reel, 0.015, 0, 0)
 box('Reel arm', 0.2, 0.03, 0.05, M['dark_steel'], reel, 0.11, 0, 0)
-torus('Reel hose', 0.13, 0.055, plain('Hose orange', '#d4571a', 0.7), reel, 0.22, 0, 0, axis='z', seg=40, rseg=14)
+HOSE = plain('Hose orange', '#d4571a', 0.7)
+cyl('Reel drum', 0.13, 0.13, 0.23, M['dark_steel'], reel, 0.22, 0, 0, axis='z', seg=32)
+for k in range(6):
+    torus(f'Reel hose coil {k}', 0.15, 0.018, HOSE, reel, 0.22, 0, (k - 2.5) * 0.036, axis='z', seg=48, rseg=12)
+cyl('Reel hose tail', 0.018, 0.018, 0.38, HOSE, reel, 0.37, -0.19, 0.09, seg=14, bevel=0)
+cyl('Reel hose nozzle', 0.015, 0.02, 0.07, M['brass'], reel, 0.37, -0.41, 0.09, seg=14)
 for sz, n in ((-1, 'a'), (1, 'b')):
-    cyl(f'Reel flange {n}', 0.2, 0.2, 0.012, M['dark_steel'], reel, 0.22, 0, sz * 0.07, axis='z', seg=40)
+    cyl(f'Reel flange {n}', 0.2, 0.2, 0.012, M['dark_steel'], reel, 0.22, 0, sz * 0.118, axis='z', seg=40)
+    cyl(f'Reel hub {n}', 0.035, 0.035, 0.02, M['steel'], reel, 0.22, 0, sz * 0.13, axis='z', seg=20)
 _prev = COL
 use('Live props')
 wb = empty('Wash bucket', None, -HW + 0.38, 0, 0.75)
@@ -759,21 +765,35 @@ use('Products')
 blower(slot('blower', 'blower', chest, -0.02, 0.93, 0.1, -PI / 2 + 0.25, 0.34))
 
 use('Furniture')
-stool = empty('Stool', None, 1.15, 0, -2.05)
-cyl('Stool seat', 0.17, 0.17, 0.05, M['black'], stool, 0, 0.66, 0, seg=40, bevel=0.012)
-cyl('Stool trim', 0.175, 0.175, 0.012, M['orange'], stool, 0, 0.63, 0, seg=40)
-cyl('Stool column', 0.02, 0.02, 0.5, M['steel'], stool, 0, 0.38, 0, seg=16, bevel=0)
-torus('Stool foot ring', 0.14, 0.008, M['steel'], stool, 0, 0.3, 0, seg=36, rseg=8)
-for i in range(5):
-    a = i / 5 * 2 * PI
-    box(f'Stool leg {i}', 0.26, 0.025, 0.035, M['dark_steel'], stool, math.cos(a) * 0.13, 0.11, math.sin(a) * 0.13, ry=-a, bevel=0.006)
-    cx, cz = math.cos(a) * 0.25, math.sin(a) * 0.25
-    # caster: wheel on the floor, a housing over it and a stem up into the leg
-    cyl(f'Stool caster {i}', 0.025, 0.025, 0.024, M['rubber'], stool, cx, 0.025, cz, seg=18, bevel=0.004, rot=(PI / 2, 0, i * 1.3))
-    cyl(f'Stool caster housing {i}', 0.014, 0.02, 0.016, M['dark_steel'], stool, cx, 0.056, cz, seg=14)
-    cyl(f'Stool caster stem {i}', 0.007, 0.007, 0.04, M['steel'], stool, cx, 0.08, cz, seg=10, bevel=0)
+# Supplied model: wooden swivel stool (inches, 30" tall).
+stool = import_obj('garage-stool.obj')
+stool.name = 'Stool'
+stool.data.transform(Matrix.Scale(0.0254, 4) @ Matrix.Translation((-50.0, 0.0, 0.0)))   # seat axis -> origin
+# its oak veneer texture uses the model's own UVs, kept as a layer named 'src' so the bake can find them
+while len(stool.data.uv_layers) > 1:
+    stool.data.uv_layers.remove(stool.data.uv_layers[-1])
+stool.data.uv_layers[0].name = 'src'
+STOOL_OAK, nt, bsdf = new_mat('Stool oak')
+bsdf.inputs['Roughness'].default_value = 0.6
+oak_tex = nt.nodes.new('ShaderNodeTexImage')
+oak_tex.image = bpy.data.images.load(os.path.join(ASSETS, 'Poliigon_WoodVeneerOak_7760_BaseColor.jpg'))
+oak_uv = nt.nodes.new('ShaderNodeUVMap')
+oak_uv.uv_map = 'src'
+nt.links.new(oak_uv.outputs['UV'], oak_tex.inputs['Vector'])
+nt.links.new(oak_tex.outputs['Color'], bsdf.inputs['Base Color'])
+for i, m in enumerate(stool.data.materials):
+    stool.data.materials[i] = M['black'] if 'black' in m.name.lower() else STOOL_OAK
+stool.location = V(1.15, 0, -2.05)
+stool.rotation_euler = (0, 0, 0.5)
+COL.objects.link(stool)
 
 use('Props')
+# two stacked cartons on the floor between the tool chest and the door
+TAPE = plain('Packing tape', '#c9a877', 0.6)
+box('Floor carton lower', 0.5, 0.4, 0.6, M['cardboard'], None, HW - 0.3, 0.2, -0.3, ry=0.04, bevel=0.004)
+box('Floor carton lower tape', 0.06, 0.002, 0.6, TAPE, None, HW - 0.3, 0.401, -0.3, ry=0.04, bevel=0)
+box('Floor carton upper', 0.42, 0.32, 0.46, M['cardboard'], None, HW - 0.31, 0.56, -0.33, ry=-0.16, bevel=0.004)
+box('Floor carton upper tape', 0.06, 0.002, 0.46, TAPE, None, HW - 0.31, 0.721, -0.33, ry=-0.16, bevel=0)
 box('Sign board', 0.02, 0.57, 1.74, M['sign'], None, HW - 0.011, 1.85, 0.75, bevel=0.004)
 # The real logo, from SudsLabLogo.svg in the project root: raised lettering,
 # "suds." in white and "lab" (everything right of LOGO_SPLIT_X) in orange.
@@ -1006,7 +1026,7 @@ for e in SLOTS:
 use('Lights')
 sun_dir = V(math.sin(SUN_AZIM) * math.cos(SUN_ELEV), math.sin(SUN_ELEV), math.cos(SUN_AZIM) * math.cos(SUN_ELEV))
 sd = bpy.data.lights.new('Sun', 'SUN')
-sd.energy = 6.0
+sd.energy = 7.0
 sd.color = (1.0, 0.83, 0.62)
 sd.angle = math.radians(0.6)        # near-real sun size -> crisp shadow edges
 so = bpy.data.objects.new('Sun', sd)
@@ -1043,8 +1063,11 @@ cams = {
     'door': camera('Cam door view', (-0.6, EYE, -1.6), 2.75, -0.06),
     # close-ups for checking details
     'yard': camera('Cam overview yard', (11.0, 27.0, -13.0), -2.72, -0.76),
+    'rightwall': camera('Cam detail right wall', (-0.6, 1.4, 0.3), 1.249, -0.24, 20),
+    'reel': camera('Cam detail reel', (-0.9, 1.3, 2.3), -1.04, -0.1, 50),
+    'tyres': camera('Cam detail tyres', (0.8, 1.4, 0.8), -0.785, -0.25, 22),
     'cart': camera('Cam detail cart', (0.3, 1.25, 1.6), -1.89, -0.28, 24),
-    'stool': camera('Cam detail stool', (0.5, 0.6, -1.2), 0.65, -0.38, 35),
+    'stool': camera('Cam detail stool', (0.3, 1.1, -0.9), 0.636, -0.455, 30),
     'sign': camera('Cam detail sign', (0.2, 1.65, 0.75), PI / 2, 0.09, 24),
     'bottles': camera('Cam detail bottles', (0.5, 1.78, -2.55), 0.0, -0.14, 35),
 }

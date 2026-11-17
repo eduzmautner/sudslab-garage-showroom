@@ -43,6 +43,7 @@ HW, HD = W / 2, D / 2
 HERO = ('Pegboard panel', 'Pegboard frame', 'Bench top', 'Bench apron', 'Peg shelf', 'Wall shelf', 'Chest top')
 CEILING = ('Ceiling', 'Joist', 'LED ')
 FLOOR = ('Floor',)
+PLANTS = ('Tree', 'Shrub', 'Bush')      # own atlas, so the lawn doesn't eat their pixels
 def in_cols(o, *names):
     return any(o.name in bpy.data.collections[n].all_objects for n in names)
 GROUPS = [   # name, which objects, atlas size
@@ -51,12 +52,19 @@ GROUPS = [   # name, which objects, atlas size
     ('ceiling', lambda o: in_cols(o, 'Shell') and o.name.startswith(CEILING), max(512, RES // 2)),
     ('hero', lambda o: in_cols(o, 'Furniture', 'Props') and o.name.startswith(HERO), RES),
     ('interior', lambda o: in_cols(o, 'Furniture', 'Props', 'Lights') and not o.name.startswith(HERO), RES),
-    ('exterior', lambda o: in_cols(o, 'Exterior'), max(512, RES // 2)),
+    ('plants', lambda o: in_cols(o, 'Exterior') and o.name.startswith(PLANTS), max(512, RES * 2 // 3)),
+    ('exterior', lambda o: in_cols(o, 'Exterior') and not o.name.startswith(PLANTS), max(512, RES * 2 // 3)),
 ]
 SHELL_GROUPS = ('floor', 'walls', 'ceiling')
 
 bpy.ops.wm.open_mainfile(filepath=os.path.join(HERE, 'garage.blend'))
 scene = bpy.context.scene
+if '--dry' in ARGS:                    # a dry run must not touch the live web files
+    import tempfile
+    OUT = tempfile.mkdtemp()
+for a in ARGS:                         # --out=DIR: write the web files somewhere else (test bakes)
+    if a.startswith('--out='):
+        OUT = a.split('=', 1)[1]
 os.makedirs(OUT, exist_ok=True)
 
 def gpu():
@@ -162,13 +170,13 @@ def join_group(name, wanted):
         idx = [0] * len(tmp.polygons)
         tmp.polygons.foreach_get('material_index', idx)
         tmp.polygons.foreach_set('material_index', [remap[i] if i < len(remap) else 0 for i in idx])
-        while tmp.uv_layers:
-            tmp.uv_layers.remove(tmp.uv_layers[0])
+        for l in [l for l in tmp.uv_layers if l.name != 'src']:   # 'src' = UVs an image-textured material needs
+            tmp.uv_layers.remove(l)
         bm.from_mesh(tmp)
         bpy.data.meshes.remove(tmp)
     if name in SHELL_GROUPS:                        # drop faces nobody inside can ever see
         bmesh.ops.delete(bm, geom=[f for f in bm.faces if not inside_room(f.calc_center_median())], context='FACES')
-    elif name != 'exterior':
+    elif name not in ('exterior', 'plants'):
         bmesh.ops.delete(bm, geom=[f for f in bm.faces if hidden_against_room(f.calc_center_median())], context='FACES')
         # backs of panels mounted a couple of centimetres off the back wall (the pegboard)
         bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.y > 0.9 and -f.calc_center_median().y < -HD + 0.03], context='FACES')
@@ -184,7 +192,9 @@ def join_group(name, wanted):
     return ob
 
 def unwrap(ob):
-    ob.data.uv_layers.new(name='bake')
+    layer = ob.data.uv_layers.new(name='bake')
+    ob.data.uv_layers.active = layer
+    layer.active_render = True
     select_only([ob])
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.select_all(action='SELECT')
@@ -250,6 +260,8 @@ for name, ob, img in baked:
     node.image = tex
     mat.node_tree.links.new(node.outputs['Color'], bsdf.inputs['Base Color'])
     bsdf.inputs['Roughness'].default_value = 1.0
+    if 'src' in ob.data.uv_layers:                  # only the bake UVs go to the browser
+        ob.data.uv_layers.remove(ob.data.uv_layers['src'])
     ob.data.materials.clear()
     ob.data.materials.append(mat)
     ob.data.polygons.foreach_set('material_index', [0] * len(ob.data.polygons))
