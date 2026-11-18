@@ -18,6 +18,7 @@ Baked light is diffuse only (no reflections), and metals are baked as plain
 grey because a view-dependent highlight cannot live in a texture.
 """
 import bpy, bmesh, math, os, shutil, sys, time
+import numpy as np
 from mathutils import Vector
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -201,11 +202,42 @@ def unwrap(ob):
     bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.0015, area_weight=0.0)
     bpy.ops.object.mode_set(mode='OBJECT')
 
+# --only=interior,hero: rebake just those sheets and reuse the saved textures/baked_*.jpg
+# for the rest. A reused sheet must keep the exact UV layout it was baked with, and
+# Smart UV Project does not always reproduce one (the interior sheet lands differently
+# on every run), so each sheet's layout is stored next to its image when it is baked
+# and loaded back here instead of being recomputed.
+ONLY = next((a.split('=', 1)[1].split(',') for a in ARGS if a.startswith('--only=')), None)
+def uv_file(name):
+    return os.path.join(HERE, 'textures', f'baked_{name}.uv.npy')
+def save_uvs(name, ob):
+    uvs = np.empty(len(ob.data.loops) * 2, dtype=np.float32)
+    ob.data.uv_layers['bake'].data.foreach_get('uv', uvs)
+    np.save(uv_file(name), uvs)
+def load_uvs(name, ob):
+    """True if the stored layout was applied; exits if the geometry no longer matches it."""
+    if not os.path.exists(uv_file(name)):
+        return False
+    uvs = np.load(uv_file(name))
+    if len(uvs) != len(ob.data.loops) * 2:
+        sys.exit(f'BAKE {name}: geometry changed since this sheet was baked - add it to --only')
+    layer = ob.data.uv_layers.new(name='bake')
+    layer.data.foreach_set('uv', uvs)
+    ob.data.uv_layers.active = layer
+    layer.active_render = True
+    return True
+
 baked = []
 for name, wanted, size in GROUPS:
     ob = join_group(name, wanted)
     log(f'{name}: joined {len(ob.data.polygons)} faces, {len(ob.data.materials)} materials')
-    unwrap(ob)
+    if ONLY and name not in ONLY and load_uvs(name, ob):
+        log(f'{name}: stored UV layout loaded')
+    else:
+        unwrap(ob)
+        if ONLY and name not in ONLY:               # no stored layout yet: keep this one from now on
+            save_uvs(name, ob)
+            log(f'{name}: no stored UV layout, saved the recomputed one')
     me = ob.data
     area = sum(p.area for p in me.polygons)
     uvs = me.uv_layers.active.data
@@ -236,10 +268,6 @@ bk.use_clear = True
 bk.use_selected_to_active = False
 scene.render.image_settings.file_format = 'JPEG'
 scene.render.image_settings.quality = 95
-# --only=interior,hero: rebake just those sheets and reuse the saved textures/baked_*.jpg
-# for the rest. Only valid while the other groups' geometry is unchanged since their
-# bake (same --res too), because their UV layout is recomputed, not stored.
-ONLY = next((a.split('=', 1)[1].split(',') for a in ARGS if a.startswith('--only=')), None)
 for name, ob, img in baked:
     if ONLY and name not in ONLY:
         log(f'{name}: reusing baked_{name}.jpg')
@@ -252,6 +280,7 @@ for name, ob, img in baked:
     bpy.ops.object.bake(type='COMBINED')
     path = os.path.join(HERE, 'textures', f'baked_{name}.jpg')
     img.save_render(path, scene=scene)              # applies the scene exposure + AgX look
+    save_uvs(name, ob)                              # the layout this image belongs to
     log(f'{name}: baked -> {os.path.basename(path)}')
 
 # ---------------------------------------------------------------- 5. export the baked room

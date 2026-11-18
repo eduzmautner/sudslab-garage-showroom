@@ -507,25 +507,148 @@ def detail_brush(e, s=1.0):
     cyl('Brush ferrule', 0.016 * s, 0.016 * s, 0.03 * s, M['steel'], e, 0, -0.158 * s, 0, seg=16)
     cyl('Brush bristles', 0.017 * s, 0.024 * s, 0.06 * s, M['bristle'], e, 0, -0.203 * s, 0, seg=16)
 
+# Bristles and microfiber "noodles" are real strands, not a texture: these products are lit
+# live in the browser, where Blender's procedural shaders don't exist, and it is the ragged
+# outline that makes a brush read as a brush. Colour is stored per strand on the mesh
+# (darker at the root, which fakes the shadow inside the pile), so a head is one material.
+FIBRE_RNG = random.Random(7)         # own generator: must not shift the random trees and bushes
+def fibre_mat():
+    if 'Fibre' in bpy.data.materials:
+        return bpy.data.materials['Fibre']
+    m, nt, b = new_mat('Fibre')
+    vc = nt.nodes.new('ShaderNodeVertexColor')
+    vc.layer_name = 'Col'
+    nt.links.new(vc.outputs['Color'], b.inputs['Base Color'])
+    b.inputs['Roughness'].default_value = 0.85
+    return m
+
+def fibres(name, strands, parent, sides=3, root=0.35):
+    """One mesh of tapered strands. strands: (base, tip, r_base, r_tip, '#colour'), viewer coords
+    relative to the parent. Each strand ends in a point so it is closed from every angle."""
+    verts, faces, cols = [], [], []
+    for a, b, r0, r1, col in strands:
+        a, b = Vector(V(*a)), Vector(V(*b))
+        ax = (b - a).normalized()
+        u = ax.orthogonal().normalized()
+        w = ax.cross(u)
+        rgb = [c * FIBRE_RNG.uniform(0.82, 1.08) for c in lin(col)[:3]]
+        i0 = len(verts)
+        for p, r, shade in ((a, r0, root), (b, r1, 1.0)):
+            for k in range(sides):
+                ang = 2 * PI * k / sides
+                verts.append(p + (u * math.cos(ang) + w * math.sin(ang)) * r)
+                cols.append((rgb[0] * shade, rgb[1] * shade, rgb[2] * shade, 1.0))
+        verts.append(b + ax * r1 * 1.2)
+        cols.append((*rgb, 1.0))
+        for k in range(sides):
+            k2 = (k + 1) % sides
+            faces.append((i0 + k, i0 + k2, i0 + sides + k2, i0 + sides + k))
+            faces.append((i0 + sides + k, i0 + sides + k2, i0 + 2 * sides))
+    me = bpy.data.meshes.new(name)
+    me.from_pydata([tuple(v) for v in verts], [], faces)
+    attr = me.color_attributes.new('Col', 'FLOAT_COLOR', 'POINT')
+    for i, c in enumerate(cols):
+        attr.data[i].color = c
+    me.color_attributes.active_color = attr
+    me.color_attributes.render_color_index = 0
+    for p in me.polygons:
+        p.use_smooth = True
+    me.materials.append(fibre_mat())
+    ob = bpy.data.objects.new(name, me)
+    ob.parent = parent
+    COL.objects.link(ob)
+    return ob
+
+def radial_head(y0, y1, radius, core, n, r0, r1, palette):
+    """Strands radiating from a core that runs down the hanging brush from y0 to y1 (the free
+    end). radius(t) is the outline, t = 0..1 along the head; the last strands fan round the end."""
+    rnd, out = FIBRE_RNG, []
+    codes = [c for c, share in palette for _ in range(int(share * 100))]
+    for i in range(n):
+        t = (i + rnd.random()) / n
+        ang = i * 2.39996 + rnd.uniform(-0.3, 0.3)                    # golden angle: even coverage
+        lean = math.radians(-12 + 30 * t if t < 0.86 else 18 + 68 * (t - 0.86) / 0.14)
+        lean += rnd.uniform(-0.16, 0.16)
+        ang2 = ang + rnd.uniform(-0.18, 0.18)
+        d = (math.cos(ang2) * math.cos(lean), -math.sin(lean), math.sin(ang2) * math.cos(lean))
+        y = y0 + (y1 - y0) * min(t, 0.97)
+        reach = radius(t) * rnd.uniform(0.86, 1.07)
+        base = (math.cos(ang) * core * 0.6, y, math.sin(ang) * core * 0.6)
+        out.append((base, (d[0] * reach, y + d[1] * reach, d[2] * reach), r0, r1, rnd.choice(codes)))
+    return out
+
 def wheel_brush(e, fluffy):
-    cyl('Wheel brush grip', 0.015, 0.017, 0.13, M['black_gloss'], e, 0, -0.065, 0, seg=16)
-    cyl('Wheel brush band', 0.018, 0.018, 0.015, M['orange'], e, 0, -0.135, 0, seg=16)
-    cyl('Wheel brush stem', 0.005, 0.005, 0.24, M['steel'], e, 0, -0.25, 0, seg=10, bevel=0)
-    if fluffy:
-        sphere('Wheel brush head', 0.04, M['grey_cloth'], e, 0, -0.29, 0, scale=(1, 1, 2.7))
-    else:
-        cyl('Wheel brush head', 0.03, 0.022, 0.19, M['orange_cloth'], e, 0, -0.27, 0, seg=16, bevel=0.006)
+    if fluffy:      # microfiber: fat chenille noodles, orange flecked with black, foam grip
+        cyl('MF brush grip', 0.016, 0.016, 0.12, M['rubber'], e, 0, -0.06, 0, seg=16, bevel=0.004)
+        cyl('MF brush stem', 0.0045, 0.0045, 0.06, M['black'], e, 0, -0.145, 0, seg=10, bevel=0)
+        cyl('MF brush guard', 0.014, 0.036, 0.016, M['black'], e, 0, -0.166, 0, seg=24)
+        cyl('MF brush core', 0.03, 0.03, 0.2, plain('MF brush core', '#8a3a08', 1.0), e, 0, -0.285, 0, seg=14, bevel=0.012)
+        fibres('MF brush noodles', radial_head(
+            -0.18, -0.4, lambda t: 0.045 + 0.008 * math.sin(PI * t), 0.03, 460, 0.0075, 0.0066,
+            [('#f47a12', 0.62), ('#e0600a', 0.2), ('#1a1512', 0.18)]), e, sides=5, root=0.5)
+    else:           # wheel brush: stiff rust and black bristles round a tapered head
+        cyl('Wheel brush grip', 0.016, 0.011, 0.11, M['black_gloss'], e, 0, -0.055, 0, seg=16, bevel=0.004)
+        cyl('Wheel brush stem', 0.004, 0.004, 0.07, M['black'], e, 0, -0.142, 0, seg=10, bevel=0)
+        cyl('Wheel brush guard', 0.012, 0.031, 0.02, plain('Guard grey', '#9a9c9f', 0.5), e, 0, -0.174, 0, seg=24)
+        cyl('Wheel brush core', 0.026, 0.016, 0.21, plain('Wheel brush core', '#3a1c08', 1.0), e, 0, -0.293, 0, seg=14, bevel=0.008)
+        fibres('Wheel brush bristles', radial_head(
+            -0.19, -0.4, lambda t: 0.047 - 0.017 * t, 0.02, 1100, 0.0026, 0.0007,
+            [('#c9651b', 0.5), ('#93470f', 0.22), ('#1c1410', 0.28)]), e)
 
 def tire_brush(e):
-    box('Tire brush handle', 0.035, 0.15, 0.03, M['black_gloss'], e, 0, -0.075, 0.012, bevel=0.01)
-    box('Tire brush block', 0.07, 0.11, 0.03, M['orange'], e, 0, -0.2, 0.01, bevel=0.008)
-    box('Tire brush bristles', 0.062, 0.1, 0.03, M['bristle'], e, 0, -0.2, 0.038, bevel=0.003)
+    """Black paddle with a fan of long orange bristles facing the room."""
+    body = plain('Brush body', '#141414', 0.62)
+    box('Tire brush handle', 0.03, 0.14, 0.022, body, e, 0, -0.07, 0.012, bevel=0.01)
+    box('Tire brush head', 0.066, 0.125, 0.028, body, e, 0, -0.2, 0.012, bevel=0.013)
+    rnd, strands = FIBRE_RNG, []
+    for ix in range(7):
+        for iy in range(13):
+            sx, sy = (ix - 3) / 3, (iy - 6) / 6                      # -1..1 across and along the head
+            for _ in range(10):
+                bx = sx * 0.023 + rnd.uniform(-0.004, 0.004)
+                by = -0.2 + sy * 0.05 + rnd.uniform(-0.004, 0.004)
+                dx, dy = sx * 0.34 + rnd.uniform(-0.07, 0.07), sy * 0.26 + rnd.uniform(-0.07, 0.07)
+                ln = 0.044 * rnd.uniform(0.9, 1.05) / math.sqrt(1 + dx * dx + dy * dy)
+                strands.append(((bx, by, 0.024), (bx + dx * ln, by + dy * ln, 0.024 + ln),
+                                0.0019, 0.0014, rnd.choice(('#ff8c0a', '#ff8c0a', '#f57200'))))
+    fibres('Tire brush bristles', strands, e, root=0.5)
 
 def wash_mitt(e):
-    cyl('Mitt pole', 0.013, 0.013, 1.25, M['alu'], e, 0, 0.625, 0, seg=14, bevel=0)
-    cyl('Mitt grip', 0.017, 0.017, 0.3, M['black_gloss'], e, 0, 0.2, 0, seg=14)
-    cyl('Mitt lock', 0.018, 0.018, 0.04, M['orange'], e, 0, 0.72, 0, seg=14)
-    box('Mitt head', 0.26, 0.2, 0.09, M['orange_cloth'], e, 0, 1.34, 0, bevel=0.035)
+    """Telescoping pole with a chenille mitt over a flat head; the mitt faces the room (+z)."""
+    cyl('Mitt pole lower', 0.014, 0.014, 0.72, M['alu'], e, 0, 0.36, 0, seg=14, bevel=0)
+    cyl('Mitt pole upper', 0.011, 0.011, 0.6, M['alu'], e, 0, 1.0, 0, seg=14, bevel=0)
+    cyl('Mitt grip', 0.018, 0.018, 0.3, M['rubber'], e, 0, 0.2, 0, seg=14, bevel=0.004)
+    for k, y in enumerate((0.47, 0.72)):
+        cyl(f'Mitt lock {k}', 0.016, 0.019, 0.05, M['black'], e, 0, y, 0, seg=14, bevel=0.003)
+    HY, HZ, A, B = 1.34, 0.02, 0.125, 0.095          # head centre height, offset off the pole, half-size
+    box('Mitt joint', 0.045, 0.07, 0.03, M['black'], e, 0, HY - 0.05, 0.006, bevel=0.008)
+    box('Mitt plate', 0.21, 0.15, 0.012, M['black'], e, 0, HY, HZ, bevel=0.005)
+    box('Mitt pad', 0.235, 0.175, 0.04, plain('Mitt pad', '#8a3a08', 1.0), e, 0, HY, HZ + 0.024, bevel=0.018)
+    rnd, strands = FIBRE_RNG, []
+    shade = lambda: rnd.choice(('#f47a12', '#f47a12', '#e0600a'))
+    def noodle(base, d):
+        n = math.sqrt(sum(c * c for c in d))
+        ln = 0.026 * rnd.uniform(0.85, 1.1)
+        strands.append((base, tuple(b + c / n * ln for b, c in zip(base, d)), 0.0075, 0.0066, shade()))
+    step = 0.0125
+    for gx in range(-10, 11):                         # the face: upright in the middle, splaying toward the edge
+        for gy in range(-8, 9):
+            x, y = gx * step + rnd.uniform(-0.004, 0.004), gy * step + rnd.uniform(-0.004, 0.004)
+            edge = ((x / A) ** 4 + (y / B) ** 4) ** 0.25
+            if edge > 0.97:
+                continue
+            out = edge ** 3
+            noodle((x, HY + y, HZ + 0.042),
+                   (x / A * out * 1.3 + rnd.uniform(-0.2, 0.2), y / B * out * 1.3 + rnd.uniform(-0.2, 0.2), 1.05 - 0.8 * out))
+    for i in range(110):                              # the rim: pointing outward all the way round
+        th = 2 * PI * (i + rnd.random()) / 110
+        c, s = math.cos(th), math.sin(th)
+        x, y = A * math.copysign(abs(c) ** 0.5, c), B * math.copysign(abs(s) ** 0.5, s)
+        nx, ny = x ** 3 / A ** 4, y ** 3 / B ** 4
+        nn = math.hypot(nx, ny)
+        noodle((x * 0.93, HY + y * 0.93, HZ + 0.026 + rnd.uniform(-0.012, 0.014)),
+               (nx / nn + rnd.uniform(-0.15, 0.15), ny / nn + rnd.uniform(-0.15, 0.15), rnd.uniform(-0.45, 0.4)))
+    fibres('Mitt noodles', strands, e, sides=5, root=0.5)
 
 def blower(e):
     box('Blower body', 0.3, 0.2, 0.2, M['black_gloss'], e, 0, 0.12, 0, bevel=0.035)
@@ -1103,6 +1226,9 @@ cams = {
     'stool': camera('Cam detail stool', (0.3, 1.1, -0.9), 0.636, -0.455, 30),
     'sign': camera('Cam detail sign', (0.2, 1.65, 0.75), PI / 2, 0.09, 24),
     'bottles': camera('Cam detail bottles', (0.5, 1.78, -2.55), 0.0, -0.14, 35),
+    'brushes': camera('Cam detail brushes', (-0.73, 1.74, -2.3), 0.0, 0.0, 35),
+    'mitt': camera('Cam detail mitt', (-1.35, 1.4, -2.2), -0.63, -0.08, 40),
+    'tirebrush': camera('Cam detail tire brush', (-0.62, 1.74, -2.85), 0.34, -0.12, 50),
 }
 scene.camera = cams['spawn']
 
