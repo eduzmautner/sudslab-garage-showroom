@@ -246,7 +246,7 @@ for name, wanted, size in GROUPS:
         pts = [uvs[li].uv for li in p.loop_indices]
         uv_area += abs(sum(pts[i].x * pts[(i + 1) % len(pts)].y - pts[(i + 1) % len(pts)].x * pts[i].y for i in range(len(pts)))) / 2
     log(f'{name}: unwrapped  surface {area:.1f} m2, atlas {size}px {uv_area * 100:.0f}% used -> {math.sqrt(uv_area / area) * size:.0f} px per metre')
-    img = bpy.data.images.new('bake_' + name, size, size, alpha=False, float_buffer=True)
+    img = bpy.data.images.new('bake_' + name, size, size, alpha=True, float_buffer=True)   # alpha marks baked pixels
     for m in ob.data.materials:                     # every material bakes into the same atlas
         node = m.node_tree.nodes.new('ShaderNodeTexImage')
         node.name = 'BAKE_TARGET'
@@ -263,8 +263,62 @@ scene.cycles.use_denoising = True
 bk = scene.render.bake
 bk.use_pass_direct = bk.use_pass_indirect = bk.use_pass_diffuse = bk.use_pass_emit = True
 bk.use_pass_glossy = bk.use_pass_transmission = False
-bk.margin = 8
+bk.margin = 0                        # clean_edges() below does the padding itself
 bk.use_clear = True
+
+def clean_edges(img, erode=2, spread=64, hidden_below=None):
+    """Rebuild every UV island's rim and pad it far out into the gaps.
+
+    The outermost pixels of an island come out of the bake uneven (only partly covered by
+    the face, and the denoiser mixes in the black background), and they are exactly what
+    the browser shows along a face edge: dark dashed seams on the low-poly plants. So the
+    outer `erode` pixels are thrown away and refilled from the clean interior, and the
+    colour is then carried `spread` pixels into the gaps so that shrunken copies of the
+    texture (mipmaps) stay clean too. Islands too thin to have an interior are kept as baked.
+    """
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    px = px.reshape(h, w, 4)
+    mask = px[..., 3] > 0.5
+    if hidden_below is not None:
+        # Outdoors every visible surface gets some sky light, so a pixel with none is buried
+        # inside another shape (a bush clump poking through a bigger bush). Left alone it shows
+        # as a dark outline along the join, so it is treated like a gap and filled over.
+        mask &= px[..., :3].max(axis=2) > hidden_below
+    def grow(m):
+        out = m.copy()
+        out[1:, :] |= m[:-1, :]
+        out[:-1, :] |= m[1:, :]
+        out[:, 1:] |= m[:, :-1]
+        out[:, :-1] |= m[:, 1:]
+        return out
+    core = mask
+    for _ in range(erode):
+        core = ~grow(~core)
+    near = core
+    for _ in range(erode + 1):
+        near = grow(near)
+    filled = core | (mask & ~near)                  # interiors, plus islands with no interior
+    rgb = px[..., :3] * filled[..., None]
+    for _ in range(erode + spread):
+        todo = ~filled
+        total = np.zeros_like(rgb)
+        count = np.zeros((h, w), dtype=np.float32)
+        have = filled.astype(np.float32)
+        for shift in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            total += np.roll(rgb, shift, axis=(0, 1))
+            count += np.roll(have, shift, axis=(0, 1))
+        new = todo & (count > 0)
+        if not new.any():
+            break
+        rgb[new] = total[new] / count[new][:, None]
+        filled |= new
+    px[..., :3] = rgb
+    px[..., 3] = 1.0
+    img.pixels.foreach_set(px.ravel())
+    return mask.mean(), core.mean()
+
 bk.use_selected_to_active = False
 scene.render.image_settings.file_format = 'JPEG'
 scene.render.image_settings.quality = 95
@@ -278,6 +332,8 @@ for name, ob, img in baked:
     select_only([ob])
     log(f'{name}: baking {img.size[0]}px at {SAMPLES} samples...')
     bpy.ops.object.bake(type='COMBINED')
+    covered, kept = clean_edges(img, hidden_below=1e-4 if name in ('plants', 'exterior') else None)
+    log(f'{name}: edges cleaned ({covered * 100:.0f}% of the sheet is baked surface, {kept * 100:.0f}% interior)')
     path = os.path.join(HERE, 'textures', f'baked_{name}.jpg')
     img.save_render(path, scene=scene)              # applies the scene exposure + AgX look
     save_uvs(name, ob)                              # the layout this image belongs to
