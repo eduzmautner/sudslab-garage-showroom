@@ -3,12 +3,13 @@
   --sl-accent: #ff5b00;
   --sl-accent-hover: #ff7a2e;
   --sl-bg: #121212;
-  --sl-panel: #1a1a1a;
+  --sl-panel: rgba(22, 22, 22, 0.6);
   --sl-card: #262626;
   --sl-text: #ffffff;
   --sl-muted: rgba(255, 255, 255, 0.62);
   --sl-line: rgba(255, 255, 255, 0.12);
-  --sl-panel-w: 400px;
+  --sl-panel-w: 450px;
+  --sl-gap: 16px;            /* space around the floating product panel */
   position: relative;
   width: 100%;
   height: var(--sl-height, min(74vh, 780px));
@@ -72,7 +73,7 @@ html.sl-lock { overflow: hidden; }
 .sl-controls { position: absolute; top: 16px; right: 16px; bottom: 16px; display: flex; flex-direction: column; justify-content: space-between; align-items: center; pointer-events: none; transition: right 0.45s cubic-bezier(0.22, 1, 0.36, 1); }
 .sl-controls > * { pointer-events: auto; }
 .sl-zoom { display: flex; flex-direction: column; gap: 8px; }
-.sl-showroom.has-panel .sl-controls { right: calc(var(--sl-panel-w) + 16px); }
+.sl-showroom.has-panel .sl-controls { right: calc(var(--sl-panel-w) + var(--sl-gap) + 16px); }
 
 .sl-hint {
   position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
@@ -86,10 +87,13 @@ html.sl-lock { overflow: hidden; }
 
 /* product panel */
 .sl-panel {
-  position: absolute; top: 0; right: 0; bottom: 0; width: var(--sl-panel-w); max-width: 100%;
-  background: var(--sl-panel); border-left: 1px solid var(--sl-line);
+  position: absolute; top: var(--sl-gap); right: var(--sl-gap); bottom: var(--sl-gap);
+  width: var(--sl-panel-w); max-width: calc(100% - 2 * var(--sl-gap));
+  /* floating card: translucent, blurs the room behind it, no shadow */
+  background: var(--sl-panel); border: 1px solid var(--sl-line); border-radius: 16px; overflow: hidden;
+  -webkit-backdrop-filter: blur(36px) saturate(1.3); backdrop-filter: blur(36px) saturate(1.3);
   display: flex; flex-direction: column;
-  transform: translateX(100%); visibility: hidden;
+  transform: translateX(calc(100% + var(--sl-gap))); visibility: hidden;
   transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), visibility 0s 0.45s;
   user-select: text;
 }
@@ -97,7 +101,7 @@ html.sl-lock { overflow: hidden; }
 .sl-panel-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; }
 .sl-count { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; color: var(--sl-muted); min-width: 56px; text-align: center; font-variant-numeric: tabular-nums; }
 .sl-close { margin-left: auto; }
-.sl-panel-body { flex: 1; overflow-y: auto; padding: 0 16px 24px; overscroll-behavior: contain; }
+.sl-panel-body { flex: 1; overflow-y: auto; padding: 0 16px 24px; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.22) transparent; }
 .sl-media { position: relative; background: #fff; border-radius: 12px; aspect-ratio: 4 / 3; overflow: hidden; }
 .sl-media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .sl-title { margin: 18px 0 4px; font-size: 22px; line-height: 1.2; font-weight: 700; color: var(--sl-text); }
@@ -117,8 +121,9 @@ html.sl-lock { overflow: hidden; }
 .sl-cta svg { width: 16px; height: 16px; }
 .sl-note, .sl-link { display: block; margin-top: 10px; text-align: center; font-size: 13px; color: var(--sl-muted); }
 .sl-link { text-decoration: underline; }
-.sl-more-label { margin: 26px 0 12px; padding-top: 18px; border-top: 1px solid var(--sl-line); font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--sl-muted); }
-.sl-more { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: thin; scrollbar-color: #444 transparent; }
+.sl-more-head { margin: 26px 0 12px; padding-top: 18px; border-top: 1px solid var(--sl-line); }
+.sl-tag { display: inline-block; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--sl-line); background: rgba(255, 255, 255, 0.08); font-size: 11px; font-weight: 600; line-height: 1.3; color: var(--sl-muted); }
+.sl-more { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.5) transparent; }
 .sl-card { flex: none; width: 112px; padding: 0; border: 0; background: none; color: var(--sl-text); cursor: pointer; text-align: left; font: inherit; }
 .sl-card img { width: 112px; height: 112px; object-fit: contain; background: #fff; border-radius: 8px; display: block; border: 2px solid transparent; transition: border-color 0.2s; }
 .sl-card:hover img, .sl-card:focus-visible img { border-color: var(--sl-accent); }
@@ -128,7 +133,8 @@ html.sl-lock { overflow: hidden; }
 /* phones: panel becomes a bottom sheet */
 @media (max-width: 720px) {
   .sl-showroom { height: var(--sl-height, min(78vh, 620px)); }
-  .sl-panel { top: auto; left: 0; width: 100%; height: 62%; border-left: 0; border-top: 1px solid var(--sl-line); border-radius: 16px 16px 0 0; transform: translateY(100%); }
+  .sl-showroom { --sl-gap: 8px; }
+  .sl-panel { top: auto; left: var(--sl-gap); width: auto; max-width: none; height: 62%; transform: translateY(calc(100% + var(--sl-gap))); }
   .sl-showroom.has-panel .sl-controls { right: 16px; bottom: calc(62% + 16px); }
   .sl-media { aspect-ratio: 16 / 9; }
   .sl-title { font-size: 19px; }

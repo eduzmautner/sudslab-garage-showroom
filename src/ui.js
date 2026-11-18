@@ -124,7 +124,7 @@ export function createUI(root, stage, { products, onSelect, onClose, onZoom, onF
            <a class="sl-link" href="${esc(p.url)}">View full details</a>`
         : `<a class="sl-cta" href="${esc(p.url)}" target="_blank" rel="noopener">Shop now ${ICON.arrow}</a>
            <div class="sl-note">Opens the product page in a new tab</div>`}
-      <div class="sl-more-label">More in this garage</div>
+      <div class="sl-more-head"><span class="sl-tag">More in this garage</span></div>
       <div class="sl-more">${others.map((o) => `
         <button type="button" class="sl-card" data-slot="${esc(o.slot)}">
           <img src="${esc(sized(o.image, 240))}" alt="" loading="lazy">
