@@ -13,7 +13,9 @@ viewer terms / -Y local in Blender). All other products are simple stand-ins
 parented to their own slot empty.
 """
 import bpy, bmesh, glob, json, math, os, random, sys
+import numpy as np
 from mathutils import Matrix, Vector
+from mathutils.bvhtree import BVHTree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(HERE, '3D assets')
@@ -214,8 +216,6 @@ M = dict(
     white=plain('White plastic', '#e9e6de', 0.35, 0, 0.3),
     cardboard=plain('Cardboard', '#b08a5c', 0.9),
     red=plain('Red paint', '#c62a1e', 0.35, 0, 0.5),
-    jug_red=plain('Jug red', '#d8402a', 0.3, 0, 0.5),
-    jug_blue=plain('Jug blue', '#3a7bd5', 0.3, 0, 0.5),
     sign=plain('Sign board', '#141414', 0.5),
     sign_white=plain('Sign white', '#f2f2f2', 0.5),
     alu=plain('Aluminium', '#c9cbcd', 0.3, 1.0),
@@ -674,13 +674,6 @@ def blower(e):
     for k, (x, z_) in enumerate(((-0.11, -0.07), (0.11, -0.07), (-0.11, 0.07), (0.11, 0.07))):
         cyl(f'Blower foot {k}', 0.015, 0.015, 0.02, M['rubber'], e, x, 0.01, z_, seg=12)
 
-def jug(name, mat, parent, x, y, z, ry):
-    g = empty(name, parent, x, y, z, ry)
-    box(name + ' body', 0.13, 0.22, 0.09, mat, g, 0, 0.11, 0, bevel=0.02)
-    box(name + ' label', 0.11, 0.1, 0.002, M['sign'], g, 0, 0.1, 0.0455, bevel=0)
-    cyl(name + ' cap', 0.02, 0.02, 0.03, M['black_gloss'], g, 0, 0.235, 0, seg=18)
-    return g
-
 # ---------------------------------------------------------------- back wall: bench + pegboard
 use('Furniture')
 BW, BD, BH = 3.0, 0.66, 0.92
@@ -764,7 +757,7 @@ for i, x in enumerate((-1.35, -0.35, 0.65)):
     cord_h = H - 2.02 - 0.16
     cyl(f'Pendant cord {i}', 0.004, 0.004, cord_h, M['black'], p, 0, cord_h / 2 + 0.1, 0, seg=8, bevel=0)
     cyl(f'Pendant shade {i}', 0.035, 0.15, 0.11, M['dark_steel'], p, 0, 0.05, 0, seg=36, bevel=0)
-    cyl(f'Pendant socket {i}', 0.025, 0.025, 0.06, M['brass'], p, 0, 0.12, 0, seg=16)
+    cyl(f'Pendant socket {i}', 0.025, 0.025, 0.06, M['black'], p, 0, 0.12, 0, seg=16)
     sphere(f'Pendant bulb {i}', 0.032, M['bulb'], p, 0, 0.0, 0)
     ld = bpy.data.lights.new(f'Pendant light {i}', 'POINT')
     ld.energy = 6
@@ -805,15 +798,11 @@ use('Slots')
 for sid, z_ in (('iron-remover', -0.72), ('bug-tar', -0.4), ('tire-cleaner', -0.08), ('tire-dressing', 0.24)):
     slot(sid, 'spray_bottle', shelves, 0.14, 1.1975, z_, PI / 2)
 use('Products')
-xc = slot('xc-wash', 'jug', shelves, 0.14, 1.1975, 0.66, PI / 2, 0.32)
-box('XC jug body', 0.13, 0.22, 0.09, M['jug_red'], xc, 0, 0.11, 0, bevel=0.02)
-box('XC jug label', 0.11, 0.1, 0.002, M['sign'], xc, 0, 0.1, 0.0455, bevel=0)
-cyl('XC jug cap', 0.02, 0.02, 0.03, M['black_gloss'], xc, 0, 0.235, 0, seg=18)
+xc = slot('xc-wash', 'jug', shelves, 0.14, 1.1975, 0.66, PI / 2, 0.32)     # the jug itself is built further down
 use('Props')
 box('Shelf tote', 0.2, 0.18, 0.36, M['black'], shelves, 0.13, 1.73, -0.6, bevel=0.02)
 box('Shelf carton', 0.2, 0.14, 0.3, M['cardboard'], shelves, 0.13, 1.71, -0.12, bevel=0.003)
-jug('Jug C3', M['jug_red'], shelves, 0.14, 1.6375, 0.35, PI / 2)
-jug('Jug MW', M['jug_blue'], shelves, 0.14, 1.6375, 0.55, PI / 2 + 0.2)
+# (the two spare jugs on the top shelf are built further down, with the XC jug)
 def import_obj(filename):
     """Import a supplied OBJ (Rhino export, Y-up) and return its single mesh object."""
     before = set(bpy.data.objects)
@@ -1178,6 +1167,197 @@ for e in SLOTS:
         ob.material_slots[idx].link = 'OBJECT'                  # per-bottle colour and label
         ob.material_slots[idx].material = mat
 
+# ---------------------------------------------------------------- 64 oz jug (XC X-Treme Conditions Wash)
+# A blow-moulded jug: cap on the left, hollow handle on the right. It is built as a coarse
+# block cage (grid cells switched on or off) and rounded by subdivision, which gives the
+# soft moulded corners and the handle hole in one go. Viewer coords, front = +z.
+def block_cage(xs, ys, zs, filled):
+    nx, ny, nz = len(xs) - 1, len(ys) - 1, len(zs) - 1
+    on = lambda i, j, k: 0 <= i < nx and 0 <= j < ny and 0 <= k < nz and filled(i, j, k)
+    bm = bmesh.new()
+    vs = {}
+    def vert(i, j, k):
+        if (i, j, k) not in vs:
+            vs[i, j, k] = bm.verts.new(V(xs[i], ys[j], zs[k]))
+        return vs[i, j, k]
+    for i in range(nx):
+        for j in range(ny):
+            for k in range(nz):
+                if not on(i, j, k):
+                    continue
+                for axis in range(3):
+                    for side in (0, 1):
+                        nb = [i, j, k]
+                        nb[axis] += 1 if side else -1
+                        if on(*nb):
+                            continue                    # shared wall between two cells: no skin
+                        c = [i, j, k]
+                        c[axis] += side
+                        a, b = [x for x in range(3) if x != axis]
+                        quad = []
+                        for da, db in ((0, 0), (1, 0), (1, 1), (0, 1)):
+                            p = list(c)
+                            p[a] += da
+                            p[b] += db
+                            quad.append(vert(*p))
+                        bm.faces.new(quad)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    return bm
+
+JUG_X = [-0.072, -0.061, -0.030, 0.000, 0.046, 0.061, 0.072]     # width: cap side ... handle side
+JUG_Y = [0.0, 0.011, 0.150, 0.170, 0.192, 0.206, 0.226]          # height: base, body, shoulder, handle hole (2 rows), handle bar
+JUG_Z = [-0.044, -0.033, -0.015, 0.015, 0.033, 0.044]            # depth
+JUG_CAP_X = -0.047
+def jug_cell(i, j, k):
+    if j <= 2:
+        return True                                               # body: the full block
+    if j == 3:
+        return i <= 2 or (i >= 4 and k == 2)                      # full-depth neck side | hole | pinched handle upright
+    if j == 4:
+        return (i <= 2 and 1 <= k <= 3) or (i >= 4 and k == 2)    # shoulder doming in under the cap
+    return i >= 2 and k == 2                                      # handle bar, from the neck to the upright
+
+def smoothstep(a, b, x):
+    t = min(1.0, max(0.0, (x - a) / (b - a)))
+    return t * t * (3 - 2 * t)
+
+def jug_mesh(name, liquid, milk, levels=3):
+    """The moulded shell. Natural (milky) plastic shows the liquid through it, so colour is
+    stored per vertex: liquid colour up to the fill line, paler in the thin handle, milky above."""
+    bm = block_cage(JUG_X, JUG_Y, JUG_Z, jug_cell)
+    cage = bpy.data.meshes.new(name + ' cage')
+    bm.to_mesh(cage)
+    bm.free()
+    src = bpy.data.objects.new(name + ' cage', cage)
+    COL.objects.link(src)
+    mod = src.modifiers.new('Subdivision', 'SUBSURF')
+    mod.levels = mod.render_levels = levels
+    me = bpy.data.meshes.new_from_object(src.evaluated_get(bpy.context.evaluated_depsgraph_get()))
+    bpy.data.objects.remove(src)
+    bpy.data.meshes.remove(cage)
+    me.name = name
+    me.polygons.foreach_set('use_smooth', [True] * len(me.polygons))
+    full, milk = lin(liquid)[:3], lin(milk)[:3]
+    attr = me.color_attributes.new('Col', 'FLOAT_COLOR', 'POINT')
+    for v in me.vertices:
+        x, h = v.co.x, v.co.z
+        empty_above = smoothstep(0.196, 0.214, h)
+        thin_handle = 0.55 * smoothstep(0.02, 0.045, x) * smoothstep(0.160, 0.182, h)
+        t = max(empty_above, thin_handle)
+        attr.data[v.index].color = (*[a + (b - a) * t for a, b in zip(full, milk)], 1.0)
+    me.color_attributes.active_color = attr
+    me.color_attributes.render_color_index = 0
+    return me
+
+def jug_mat():
+    if 'Jug plastic' in bpy.data.materials:
+        return bpy.data.materials['Jug plastic']
+    m, nt, b = new_mat('Jug plastic')
+    vc = nt.nodes.new('ShaderNodeVertexColor')
+    vc.layer_name = 'Col'
+    nt.links.new(vc.outputs['Color'], b.inputs['Base Color'])
+    b.inputs['Roughness'].default_value = 0.4
+    # half see-through, like natural plastic with liquid behind it. Plain alpha, matching
+    # the viewer (JUG.opacity in src/garage.js); here it sets how solid the baked shadow is
+    b.inputs['Alpha'].default_value = 0.5
+    return m
+
+def jug_label(name, body, mat, parent, w, h, y0, r=0.003, n=12, lift=0.0006):
+    """Front label: a w x h sheet starting y0 above the base, pressed onto the moulded shell
+    so it follows the slight curve of the panel. Corners are rounded like the die-cut sticker."""
+    tree = BVHTree.FromPolygons([v.co.copy() for v in body.vertices], [tuple(p.vertices) for p in body.polygons])
+    us = sorted({0.0, r / w, 1 - r / w, 1.0} | {i / n for i in range(1, n)})
+    ws = sorted({0.0, r / h, 1 - r / h, 1.0} | {i / n for i in range(1, n)})
+    verts, uvs = [], []
+    for t in ws:
+        for u in us:
+            if u in (0.0, 1.0) and t in (0.0, 1.0):               # pull each corner onto its arc
+                u += (0.29 * r / w) * (1 if u == 0.0 else -1)
+                t += (0.29 * r / h) * (1 if t == 0.0 else -1)
+            x, y = (u - 0.5) * w, y0 + t * h
+            hit = tree.ray_cast(Vector((x, -0.3, y)), Vector((0, 1, 0)))[0]
+            verts.append((x, (hit.y if hit else -JUG_Z[-1]) - lift, y))
+            uvs.append((u, t))
+    cols = len(us)
+    faces = [(j * cols + i, j * cols + i + 1, (j + 1) * cols + i + 1, (j + 1) * cols + i)
+             for j in range(len(ws) - 1) for i in range(cols - 1)]
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    uv = me.uv_layers.new()
+    for lp in me.loops:
+        uv.data[lp.index].uv = uvs[lp.vertex_index]
+    me.polygons.foreach_set('use_smooth', [True] * len(me.polygons))
+    me.materials.append(mat)
+    ob = bpy.data.objects.new(name, me)
+    ob.parent = parent
+    COL.objects.link(ob)
+    return ob
+
+def ribbed_cap(name, r, h, mat, parent, x, y, z, ribs=44):
+    """Screw cap with moulded grip ribs: a saw-tooth outline, flat shaded so each rib catches light."""
+    bm = bmesh.new()
+    n = ribs * 2
+    def ring(rad, zz):
+        return [bm.verts.new((rad(k) * math.cos(2 * PI * k / n), rad(k) * math.sin(2 * PI * k / n), zz)) for k in range(n)]
+    rib = lambda k: r if k % 2 else r - 0.0009
+    lo, hi, top = ring(rib, -h / 2), ring(rib, h / 2 - 0.0025), ring(lambda k: r - 0.003, h / 2)
+    for a, b in ((lo, hi), (hi, top)):
+        for k in range(n):
+            bm.faces.new((a[k], a[(k + 1) % n], b[(k + 1) % n], b[k]))
+    bm.faces.new(top)
+    bm.faces.new(lo[::-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    return finish(name, bm, mat, parent, (x, y, z), smooth=lambda p: False)
+
+def brand_label():
+    """Label for the unbranded spare jugs: only the brand block (flask, wordmark, size) cut
+    from the top of the XC artwork and centred on black. Drawn once, then kept in textures/."""
+    path = os.path.join(TEXTURES, 'label_JUG.png')
+    art = sorted(glob.glob(os.path.join(HERE, '2D assets', 'XC64ozAsset*.png')))
+    if not os.path.exists(path):
+        if not art:
+            return M['sign']                    # no artwork to cut from: plain black panel
+        src = bpy.data.images.load(art[0], check_existing=True)
+        w, h = src.size
+        px = np.empty(w * h * 4, dtype=np.float32)
+        src.pixels.foreach_get(px)
+        px = px.reshape(h, w, 4)                # row 0 is the bottom of the picture
+        band = int(h * 0.34)                    # everything above the red product box
+        out = np.zeros((h, w, 4), np.float32)
+        out[..., 3] = 1.0
+        y0 = (h - band) // 2
+        top = px[h - band:, :, :3] * px[h - band:, :, 3:4]
+        c = w // 40
+        top[-c:, :c] = top[-c:, -c:] = 0        # the artwork's white corners outside its rounded edge
+        out[y0:y0 + band, :, :3] = top
+        out = out[:h // 2 * 2, :w // 2 * 2].reshape(h // 2, 2, w // 2, 2, 4).mean((1, 3))   # half size is plenty for a prop
+        img = bpy.data.images.new('label_JUG', out.shape[1], out.shape[0], alpha=False)
+        img.pixels.foreach_set(out.ravel())
+        img.filepath_raw = path
+        img.file_format = 'PNG'
+        img.save()
+        bpy.data.images.remove(img)
+    return label_mat('JUG')
+
+def moulded_jug(name, e, liquid, label, milk='#efe6e8'):
+    """A whole jug on the anchor e: shell, front label, neck, tamper band and cap."""
+    me = jug_mesh(name, liquid, milk)
+    me.materials.append(jug_mat())
+    body = bpy.data.objects.new(name + ' body', me)
+    body.parent = e
+    COL.objects.link(body)
+    jug_label(name + ' label', me, label, e, 0.100, 0.1058, 0.042)
+    # the shell is see-through, so the neck stops at the shoulder instead of plugging into it
+    cyl(name + ' neck', 0.016, 0.016, 0.009, M['white'], e, JUG_CAP_X, 0.208, 0, seg=24, bevel=0)
+    cyl(name + ' cap band', 0.0195, 0.0195, 0.005, M['white'], e, JUG_CAP_X, 0.2085, 0, seg=32, bevel=0.0008)
+    ribbed_cap(name + ' cap', 0.019, 0.023, M['white'], e, JUG_CAP_X, 0.2235, 0)
+
+use('Products')
+moulded_jug('XC jug', xc, '#f178b6', label_mat('XC64oz'))     # hot pink; set by eye in the browser, where the shelf light is warm and dim
+use('Live props')        # see-through, so lit live like the products rather than baked
+for name, z_, ry, liquid in (('Jug orange', 0.35, PI / 2, '#f5c79a'), ('Jug clear', 0.55, PI / 2 + 0.2, '#dfe7e8')):
+    moulded_jug(name, empty(name, shelves, 0.14, 1.6375, z_, ry), liquid, brand_label(), milk='#eeebe4')
+
 # ---------------------------------------------------------------- sun, sky, cameras
 use('Lights')
 sun_dir = V(math.sin(SUN_AZIM) * math.cos(SUN_ELEV), math.sin(SUN_ELEV), math.cos(SUN_AZIM) * math.cos(SUN_ELEV))
@@ -1229,6 +1409,8 @@ cams = {
     'brushes': camera('Cam detail brushes', (-0.73, 1.74, -2.3), 0.0, 0.0, 35),
     'mitt': camera('Cam detail mitt', (-1.35, 1.4, -2.2), -0.63, -0.08, 40),
     'tirebrush': camera('Cam detail tire brush', (-0.62, 1.74, -2.85), 0.34, -0.12, 50),
+    'jug': camera('Cam detail jug', (-HW + 0.9, 1.36, -0.80), -1.453, -0.065, 40),
+    'jugside': camera('Cam detail jug side', (-HW + 0.6, 1.36, -0.35), -0.705, -0.07, 40),
 }
 scene.camera = cams['spawn']
 

@@ -34,6 +34,10 @@ const SUN = { elevation: 15, azimuth: 20, intensity: 1.6, color: new THREE.Color
 // see-through a strongly coloured liquid is (0 = solid, 1 = fully clear).
 const LIQUID = { thickness: 0.08, attenuationDistance: 1.0, clarity: 0.4 };
 
+// The moulded jugs (natural plastic with liquid behind it): how solid they look.
+// 1 = opaque, 0.5 = half the jug's own colour and half the room behind it.
+const JUG = { opacity: 0.5 };
+
 // Fetches a binary asset. With `packed`, reads `<url>.json` ({ data: base64 }) instead,
 // for hosts that only serve text and image files.
 async function loadBuffer(url, packed) {
@@ -82,6 +86,17 @@ export async function loadGarage(scene, renderer, base, packed = false) {
     if (!o.isMesh) return;
     const m = o.material;
     if (m.map) m.map.anisotropy = maxAniso;
+    if (m.name.startsWith('Jug plastic')) {
+      // Plain blending rather than glass-style transmission: transmission tints the room
+      // behind with the jug's colour, and pink over a cream wall is just pink again, so
+      // the jug did not read as see-through at all. Both sides are drawn, which lets the
+      // far wall and base of the jug show faintly through the near one.
+      m.transmission = 0;
+      m.transparent = true;
+      m.opacity = JUG.opacity;
+      m.depthWrite = false;
+      m.side = THREE.DoubleSide;
+    }
     if (m.transmission > 0 && !m.userData.tuned) {
       // See-through materials arrive with just a flat tint. Give them depth instead:
       // clear at the edges of thin plastic, richer colour through a bottle of liquid.
