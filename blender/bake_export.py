@@ -45,6 +45,7 @@ HERO = ('Pegboard panel', 'Pegboard frame', 'Bench top', 'Bench apron', 'Peg she
 CEILING = ('Ceiling', 'Joist', 'LED ')
 FLOOR = ('Floor',)
 PLANTS = ('Tree', 'Shrub', 'Bush')      # own atlas, so the lawn doesn't eat their pixels
+FENCE = ('Fence',)                      # likewise: thin white panels and posts need far more than the lawn
 def in_cols(o, *names):
     return any(o.name in bpy.data.collections[n].all_objects for n in names)
 GROUPS = [   # name, which objects, atlas size
@@ -53,10 +54,12 @@ GROUPS = [   # name, which objects, atlas size
     ('ceiling', lambda o: in_cols(o, 'Shell') and o.name.startswith(CEILING), max(512, RES // 2)),
     ('hero', lambda o: in_cols(o, 'Furniture', 'Props') and o.name.startswith(HERO), RES),
     ('interior', lambda o: in_cols(o, 'Furniture', 'Props', 'Lights') and not o.name.startswith(HERO), RES),
-    ('plants', lambda o: in_cols(o, 'Exterior') and o.name.startswith(PLANTS), max(512, RES * 2 // 3)),
-    ('exterior', lambda o: in_cols(o, 'Exterior') and not o.name.startswith(PLANTS), max(512, RES * 2 // 3)),
+    ('plants', lambda o: in_cols(o, 'Exterior') and o.name.startswith(PLANTS), RES),
+    ('fence', lambda o: in_cols(o, 'Exterior') and o.name.startswith(FENCE), max(512, RES * 2 // 3)),
+    ('exterior', lambda o: in_cols(o, 'Exterior') and not o.name.startswith(PLANTS + FENCE), max(512, RES * 2 // 3)),
 ]
 SHELL_GROUPS = ('floor', 'walls', 'ceiling')
+OUTDOORS = ('plants', 'fence', 'exterior')
 
 bpy.ops.wm.open_mainfile(filepath=os.path.join(HERE, 'garage.blend'))
 scene = bpy.context.scene
@@ -177,10 +180,22 @@ def join_group(name, wanted):
         bpy.data.meshes.remove(tmp)
     if name in SHELL_GROUPS:                        # drop faces nobody inside can ever see
         bmesh.ops.delete(bm, geom=[f for f in bm.faces if not inside_room(f.calc_center_median())], context='FACES')
-    elif name not in ('exterior', 'plants'):
+    elif name not in OUTDOORS:
         bmesh.ops.delete(bm, geom=[f for f in bm.faces if hidden_against_room(f.calc_center_median())], context='FACES')
         # backs of panels mounted a couple of centimetres off the back wall (the pegboard)
         bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.y > 0.9 and -f.calc_center_median().y < -HD + 0.03], context='FACES')
+    if name == 'fence':
+        # The 33 m panel is one UV island, and an island that long sets the scale of the whole
+        # sheet (it has to fit across it). Cut the fence into 3 m lengths so they pack tightly.
+        for axis in (0, 1):
+            lo, hi = min(v.co[axis] for v in bm.verts), max(v.co[axis] for v in bm.verts)
+            at = lo + 3.0
+            while at < hi - 0.5:
+                cut = bmesh.ops.bisect_plane(
+                    bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:],
+                    plane_co=(at, 0, 0) if axis == 0 else (0, at, 0), plane_no=(1, 0, 0) if axis == 0 else (0, 1, 0))
+                bmesh.ops.split_edges(bm, edges=[e for e in cut['geom_cut'] if isinstance(e, bmesh.types.BMEdge)])
+                at += 3.0
     me = bpy.data.meshes.new('baked_' + name)
     bm.to_mesh(me)
     bm.free()
@@ -274,7 +289,7 @@ def clean_edges(img, erode=2, spread=64, hidden_below=None):
     the browser shows along a face edge: dark dashed seams on the low-poly plants. So the
     outer `erode` pixels are thrown away and refilled from the clean interior, and the
     colour is then carried `spread` pixels into the gaps so that shrunken copies of the
-    texture (mipmaps) stay clean too. Islands too thin to have an interior are kept as baked.
+    texture (mipmaps) stay clean too.
     """
     w, h = img.size
     px = np.empty(w * h * 4, dtype=np.float32)
@@ -293,14 +308,30 @@ def clean_edges(img, erode=2, spread=64, hidden_below=None):
         out[:, 1:] |= m[:, :-1]
         out[:, :-1] |= m[:, 1:]
         return out
-    core = mask
-    for _ in range(erode):
-        core = ~grow(~core)
-    near = core
-    for _ in range(erode + 1):
-        near = grow(near)
-    filled = core | (mask & ~near)                  # interiors, plus islands with no interior
+    def shrink(m, n):
+        for _ in range(n):
+            m = ~grow(~m)
+        return m
+    def swell(m, n):
+        for _ in range(n):
+            m = grow(m)
+        return m
+    # Keep the cleanest pixels each island has: `erode` px in from the rim where it is wide
+    # enough, 1 px in where it is thinner (a fence panel's top edge), and for slivers only a
+    # pixel or two wide the brightest pixel next to each one, since a rim only comes out too dark.
+    core = shrink(mask, erode)
+    thin = mask & ~swell(core, erode + 1)
+    core1 = shrink(mask, 1) & thin
+    sliver = thin & ~swell(core1, 2)
+    filled = core | core1 | sliver
     rgb = px[..., :3] * filled[..., None]
+    if sliver.any():
+        lit = px[..., :3] * mask[..., None]
+        best = lit.copy()
+        for shift in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)):
+            np.maximum(best, np.roll(lit, shift, axis=(0, 1)), out=best)
+        rgb[sliver] = best[sliver]
+        del lit, best
     for _ in range(erode + spread):
         todo = ~filled
         total = np.zeros_like(rgb)
@@ -332,7 +363,8 @@ for name, ob, img in baked:
     select_only([ob])
     log(f'{name}: baking {img.size[0]}px at {SAMPLES} samples...')
     bpy.ops.object.bake(type='COMBINED')
-    covered, kept = clean_edges(img, hidden_below=1e-4 if name in ('plants', 'exterior') else None)
+    # the lawn runs on under the driveway slab, where a little light leaks in: a higher cut-off
+    covered, kept = clean_edges(img, hidden_below={'exterior': 0.01}.get(name, 1e-4) if name in OUTDOORS else None)
     log(f'{name}: edges cleaned ({covered * 100:.0f}% of the sheet is baked surface, {kept * 100:.0f}% interior)')
     path = os.path.join(HERE, 'textures', f'baked_{name}.jpg')
     img.save_render(path, scene=scene)              # applies the scene exposure + AgX look
