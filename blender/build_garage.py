@@ -12,7 +12,7 @@ Spray bottles are intentionally NOT modelled: each one is an empty named
 viewer terms / -Y local in Blender). All other products are simple stand-ins
 parented to their own slot empty.
 """
-import bpy, bmesh, json, math, os, random, sys
+import bpy, bmesh, glob, json, math, os, random, sys
 from mathutils import Matrix, Vector
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -710,7 +710,7 @@ tyres.name = 'Stacked tyres'
 TYRE_SCALE = 0.66 / 29.0
 tyres.data.transform(Matrix.Scale(TYRE_SCALE, 4) @ Matrix.Translation((11.0, 105.0, 0.0)))   # stack centre -> origin
 tyres.data.materials.clear()
-tyres.data.materials.append(plain('Tyre rubber', '#1a1a1a', 0.78))
+tyres.data.materials.append(plain('Tyre rubber', '#2e2e2e', 0.78))
 tyres.location = V(-HW + 0.37, 0, -2.2)
 tyres.rotation_euler = (0, 0, -PI / 2)          # leaning tyre runs along the wall, toward the door
 COL.objects.link(tyres)
@@ -851,15 +851,17 @@ box('Bench mat', 1.6, 0.015, 0.6, M['rubber'], None, -0.35, 0.0075, -HD + BD + 0
 
 # ---------------------------------------------------------------- spray bottles (supplied model)
 BOTTLES = {   # slot: (label code, label lines, liquid colour)
-    'leather': ('LC', ['LEATHER', 'CLEANER'], '#e6dcc6'),
-    'ceramic-detail': ('CD', ['CERAMIC', 'DETAIL SPRAY'], '#3a7bd5'),
-    'graphene': ('GC', ['GRAPHENE', 'SPRAY COATING'], '#3b3f45'),
-    'ceramic-wash': ('CP', ['CERAMIC', 'PROTECTIVE WASH'], '#7fd0e8'),
-    'iron-remover': ('FE', ['IRON PARTICLE', 'REMOVER'], '#8e3fb0'),
+    'leather': ('LC', ['LEATHER', 'CLEANER'], '#f0a460'),
+    'ceramic-detail': ('CD', ['CERAMIC', 'DETAIL SPRAY'], '#f08a1c'),
+    'graphene': ('GC', ['GRAPHENE', 'SPRAY COATING'], '#5f8291'),
+    'ceramic-wash': ('CP', ['CERAMIC', 'PROTECTIVE WASH'], '#2fb83a'),
+    'iron-remover': ('FE', ['IRON PARTICLE', 'REMOVER'], '#eef2f2'),
     'bug-tar': ('BT', ['BUG + TAR', 'REMOVER'], '#e8e4da'),
     'tire-cleaner': ('TC', ['TIRE + RIM', 'CLEANER'], '#2f7fd6'),
-    'tire-dressing': ('T3', ['TIRE + TRIM', 'DRESSING'], '#f1ede4'),
+    'tire-dressing': ('T3', ['TIRE + TRIM', 'DRESSING'], '#b7a3e8'),
 }
+
+CLEAR_LIQUIDS = {'CP', 'LC', 'FE'}       # label codes whose liquid is see-through
 
 def render_labels():
     """Draw each wrap-around label (text and all) with Blender itself, once."""
@@ -969,6 +971,31 @@ for vi in {v for p in bottle_me.polygons if p.material_index == LABEL for v in p
     co.x *= k
     co.y *= k
 print(f'BOTTLE faces {full_faces} -> {len(bottle_me.polygons)}')
+# A real bottle is clear plastic holding liquid up to the shoulder. Split the shell at the
+# fill line: liquid colour below, clear plastic above (neck and threads), and a flat
+# liquid surface just inside the wall where the two meet.
+FILL_Z = 0.186
+bottle_me.materials.append(plain('Bottle plastic', '#f4f6f5', 0.08))
+bottle_me.materials.append(None)
+CLEAR, SURFACE = len(bottle_me.materials) - 2, len(bottle_me.materials) - 1
+next(n for n in bottle_me.materials[CLEAR].node_tree.nodes
+     if n.bl_idname == 'ShaderNodeBsdfPrincipled').inputs['Transmission Weight'].default_value = 1.0
+bm = bmesh.new()
+bm.from_mesh(bottle_me)
+shell = [f for f in bm.faces if f.material_index == BODY]
+cut = bmesh.ops.bisect_plane(
+    bm, geom=shell + list({e for f in shell for e in f.edges}) + list({v for f in shell for v in f.verts}),
+    plane_co=(0, 0, FILL_Z), plane_no=(0, 0, 1))
+for f in bm.faces:
+    if f.material_index == BODY and f.calc_center_median().z > FILL_Z:
+        f.material_index = CLEAR
+rim = max(math.hypot(v.co.x, v.co.y) for v in cut['geom_cut'] if isinstance(v, bmesh.types.BMVert))
+disc = bmesh.ops.create_circle(bm, cap_ends=True, segments=32, radius=rim * 0.97,
+                               matrix=Matrix.Translation((0, 0, FILL_Z - 0.0005)))
+for f in {f for v in disc['verts'] for f in v.link_faces}:
+    f.material_index = SURFACE
+bm.to_mesh(bottle_me)
+bm.free()
 # wrap-around UVs for the label band: u runs around the bottle with the front (trigger side, -Y) at 0.5
 uv = bottle_me.uv_layers.active or bottle_me.uv_layers.new()
 zs = [bottle_me.vertices[v].co.z for p in bottle_me.polygons if p.material_index == LABEL for v in p.vertices]
@@ -999,11 +1026,16 @@ def liquid_mat(code, color):
     b.inputs['Roughness'].default_value = 0.28
     b.inputs['Coat Weight'].default_value = 0.4
     m.diffuse_color = lin(color)
+    if code in CLEAR_LIQUIDS:        # see-through; the viewer adds the depth tint (src/garage.js)
+        b.inputs['Transmission Weight'].default_value = 1.0
+        b.inputs['Roughness'].default_value = 0.05
     return m
 
 def label_mat(code):
     m, nt, b = new_mat(f'Label {code}')
-    img = bpy.data.images.load(os.path.join(TEXTURES, f'label_{code}.png'), check_existing=True)
+    # supplied print artwork ('2D assets/CPAsset 1.png') wins over the drawn placeholder
+    art = sorted(glob.glob(os.path.join(HERE, '2D assets', f'{code}Asset*.png')))
+    img = bpy.data.images.load(art[0] if art else os.path.join(TEXTURES, f'label_{code}.png'), check_existing=True)
     img.pack()
     tex = nt.nodes.new('ShaderNodeTexImage')
     tex.image = img
@@ -1018,7 +1050,8 @@ for e in SLOTS:
     ob = bpy.data.objects.new(f"Bottle {code}", bottle_me)        # all eight share one mesh
     ob.parent = e
     COL.objects.link(ob)
-    for idx, mat in ((BODY, liquid_mat(code, color)), (LABEL, label_mat(code))):
+    for idx, mat in ((BODY, liquid_mat(code, color)), (LABEL, label_mat(code)),
+                     (SURFACE, plain(f'Liquid top {code}', color, 0.15))):
         ob.material_slots[idx].link = 'OBJECT'                  # per-bottle colour and label
         ob.material_slots[idx].material = mat
 

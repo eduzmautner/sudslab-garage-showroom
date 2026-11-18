@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadGarage, EXPOSURE } from './garage.js';
+import { loadGarage, EXPOSURE, TONE_MAPPING } from './garage.js';
 import { createUI } from './ui.js';
 
 const EYE = 1.5;
@@ -24,7 +24,7 @@ export async function mountShowroom(root, { products }) {
   root.appendChild(loading);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  renderer.toneMapping = THREE.AgXToneMapping; // only affects the live-lit products
+  renderer.toneMapping = TONE_MAPPING; // only affects the live-lit products
   renderer.toneMappingExposure = EXPOSURE;
   stage.appendChild(renderer.domElement);
 

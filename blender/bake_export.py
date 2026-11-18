@@ -222,7 +222,7 @@ for name, wanted, size in GROUPS:
         m.node_tree.nodes.active = node
     baked.append((name, ob, img))
 
-if '--dry' in ARGS:
+if '--dry' in ARGS or '--products' in ARGS:     # --products: refresh products.glb and env.hdr only
     sys.exit(0)
 
 # ---------------------------------------------------------------- 4. bake
@@ -236,7 +236,14 @@ bk.use_clear = True
 bk.use_selected_to_active = False
 scene.render.image_settings.file_format = 'JPEG'
 scene.render.image_settings.quality = 95
+# --only=interior,hero: rebake just those sheets and reuse the saved textures/baked_*.jpg
+# for the rest. Only valid while the other groups' geometry is unchanged since their
+# bake (same --res too), because their UV layout is recomputed, not stored.
+ONLY = next((a.split('=', 1)[1].split(',') for a in ARGS if a.startswith('--only=')), None)
 for name, ob, img in baked:
+    if ONLY and name not in ONLY:
+        log(f'{name}: reusing baked_{name}.jpg')
+        continue
     for m in ob.data.materials:                     # the shared BAKE_TARGET nodes point at one image at a time
         m.node_tree.nodes['BAKE_TARGET'].image = img
         m.node_tree.nodes.active = m.node_tree.nodes['BAKE_TARGET']
