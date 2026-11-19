@@ -25,7 +25,7 @@ PI = math.pi
 
 # ---------------------------------------------------------------- dimensions
 W, D, H = 4.8, 6.8, 2.85            # interior width, depth, height
-DOOR_W, DOOR_H, DOOR_OPEN = 3.0, 2.35, 0.75
+DOOR_W, DOOR_H, DOOR_OPEN = 3.0, 2.35, 0.7716     # open fraction: bottom edge at 1.813 m (was 0.75, raised 2 inches)
 HW, HD = W / 2, D / 2
 SUN_ELEV, SUN_AZIM = math.radians(15), math.radians(20)   # = Blender sun rotation X 75, Z 20
 EYE = 1.5
@@ -478,28 +478,138 @@ for i, (x, z_, r) in enumerate(BUSHES):
     faceted_blob(f'Bush {i} clump', r * 0.6, rnd.choice(LEAF), None, x + math.cos(a) * r * 0.8, r * 0.35, HD + z_ + math.sin(a) * r * 0.8, squash=0.75)
 
 # ---------------------------------------------------------------- product stand-ins (non-bottle)
-def foam_cannon(e):
-    cyl('Foam cannon bottle', 0.05, 0.046, 0.15, M['white'], e, 0, 0.075, 0)
-    box('Foam cannon divider', 0.004, 0.15, 0.101, M['black'], e, 0, 0.075, 0, bevel=0)
-    cyl('Foam cannon collar', 0.053, 0.053, 0.03, M['black_gloss'], e, 0, 0.165, 0)
-    cyl('Foam cannon ring', 0.055, 0.055, 0.012, M['orange'], e, 0, 0.186, 0)
-    box('Foam cannon head', 0.05, 0.045, 0.13, M['black_gloss'], e, 0, 0.215, 0.01, bevel=0.008)
-    cyl('Foam cannon nozzle', 0.024, 0.02, 0.05, M['black_gloss'], e, 0, 0.215, 0.1, axis='z', seg=20)
-    cyl('Foam cannon inlet', 0.011, 0.011, 0.05, M['brass'], e, 0, 0.215, -0.08, axis='z', seg=16)
-    cyl('Foam cannon dial', 0.018, 0.018, 0.02, M['orange'], e, 0, 0.25, 0, seg=20)
+# Microfiber towels. They are lit live in the browser, so the soft look cannot come from a
+# Blender shader: it comes from the shape (a rounded, slightly uneven pad rather than a slab)
+# and two small tiling images drawn once here - a fuzzy bump and a light/dark mottle.
+def tile_noise(n, cells, blur, seed):
+    """Seamless grey noise, n x n: random cells enlarged and blurred with wrap-around."""
+    rng = np.random.default_rng(seed)
+    a = np.kron(rng.random((cells, cells)), np.ones((n // cells, n // cells))).astype(np.float32)
+    step = max(1, n // cells)           # start as wide as a cell so the cell edges melt away
+    while step >= 1:
+        for _ in range(blur):
+            a = (a + np.roll(a, step, 0) + np.roll(a, -step, 0) + np.roll(a, step, 1) + np.roll(a, -step, 1)) / 5
+        step //= 2
+    a -= a.min()
+    return a / a.max()
 
-def foam_master(e):
-    cyl('Foam master tank', 0.058, 0.062, 0.19, M['white'], e, 0, 0.095, 0)
-    cyl('Foam master band', 0.063, 0.063, 0.012, M['orange'], e, 0, 0.03, 0)
-    cyl('Foam master cap', 0.05, 0.058, 0.05, M['black_gloss'], e, 0, 0.215, 0)
-    cyl('Foam master rod', 0.012, 0.012, 0.08, M['black_gloss'], e, 0, 0.28, 0, seg=14)
-    cyl('Foam master handle', 0.014, 0.014, 0.11, M['orange'], e, 0, 0.32, 0, axis='x', seg=14)
-    cyl('Foam master nozzle', 0.01, 0.014, 0.05, M['black_gloss'], e, 0, 0.225, 0.07, axis='z', seg=14)
+TOWEL_TILE = 0.08                    # metres of cloth covered by one repeat of the images
+def towel_image(name, rgb_rows, data=False):
+    path = os.path.join(TEXTURES, name + '.png')
+    if not os.path.exists(path):
+        os.makedirs(TEXTURES, exist_ok=True)
+        n = rgb_rows.shape[0]
+        px = np.ones((n, n, 4), np.float32)
+        px[..., :3] = rgb_rows
+        img = bpy.data.images.new(name, n, n, alpha=False, is_data=data)
+        img.pixels.foreach_set(px.ravel())
+        img.filepath_raw = path
+        img.file_format = 'PNG'
+        img.save()
+        bpy.data.images.remove(img)
+    img = bpy.data.images.load(path, check_existing=True)
+    if data:
+        img.colorspace_settings.name = 'Non-Color'
+    img.pack()
+    return img
+
+def towel_mat(name, color):
+    n = 512
+    fuzz = tile_noise(n, 256, 1, 1)             # ~1 mm pile
+    lumps = tile_noise(n, 16, 3, 2)             # ~5 mm unevenness
+    height = 0.55 * fuzz + 0.45 * lumps
+    dx = (np.roll(height, -1, 1) - np.roll(height, 1, 1)) * 6.0
+    dy = (np.roll(height, -1, 0) - np.roll(height, 1, 0)) * 6.0
+    nrm = np.stack([-dx, -dy, np.ones_like(dx)], -1)
+    nrm /= np.linalg.norm(nrm, axis=-1, keepdims=True)
+    h = color.lstrip('#')
+    srgb = np.array([int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)], np.float32)
+    shade = 0.91 + 0.09 * (0.6 * lumps + 0.4 * fuzz)
+    m, nt, b = new_mat(name)
+    col = nt.nodes.new('ShaderNodeTexImage')
+    col.image = towel_image('towel_' + h, srgb[None, None, :] * shade[..., None])
+    nt.links.new(col.outputs['Color'], b.inputs['Base Color'])
+    bump_tex = nt.nodes.new('ShaderNodeTexImage')
+    bump_tex.image = towel_image('towel_pile_normal', nrm * 0.5 + 0.5, data=True)
+    nm = nt.nodes.new('ShaderNodeNormalMap')
+    nm.inputs['Strength'].default_value = 1.0
+    nt.links.new(bump_tex.outputs['Color'], nm.inputs['Color'])
+    nt.links.new(nm.outputs['Normal'], b.inputs['Normal'])
+    b.inputs['Roughness'].default_value = 0.95
+    # a light sheen in the cloth's own colour: a strong white one greys the towel out
+    b.inputs['Sheen Weight'].default_value = 0.35
+    b.inputs['Sheen Tint'].default_value = lin(color)
+    # The bench is dimmer for live-lit objects than for the baked ones around them, which left
+    # the towels looking rusty. A faint glow in their own colour lifts them back to a lively
+    # orange; set by eye in the browser (0.13 already flattens the shading).
+    b.inputs['Emission Color'].default_value = lin(color)
+    b.inputs['Emission Strength'].default_value = 0.07
+    m.diffuse_color = lin(color)
+    return m
+
+def towel(name, e, mat, w, d, t, x, y, z, ry=0.0, corner=0.016, seed=0):
+    """One folded towel, w x d and t thick, its underside at height y. Built as rings running
+    in from a fully rounded edge, so there is no hard corner anywhere, and the flat of the
+    pad is nudged up and down by under a millimetre so it does not read as a rigid board."""
+    from mathutils import noise
+    a, b_, h = w / 2, d / 2, t / 2
+    N = 120
+    def outline(inset):
+        aa, bb = a - inset, b_ - inset
+        r = min(max(corner - inset, 0.0008), aa, bb)
+        pts = []
+        for k in range(N):
+            c, s_ = math.cos(2 * PI * k / N), math.sin(2 * PI * k / N)
+            tt = min(aa / max(abs(c), 1e-9), bb / max(abs(s_), 1e-9))
+            px, pz = tt * c, tt * s_
+            if abs(px) > aa - r and abs(pz) > bb - r:                       # in a rounded corner
+                cx, cz = math.copysign(aa - r, c), math.copysign(bb - r, s_)
+                uc = c * cx + s_ * cz
+                tt = uc + math.sqrt(max(uc * uc - (cx * cx + cz * cz) + r * r, 0.0))
+                px, pz = tt * c, tt * s_
+            pts.append((px, pz))
+        return pts
+    rings = [(h * (1 - math.cos(f * PI / 2)), h * math.sin(f * PI / 2)) for f in (0, 0.25, 0.5, 0.75, 1.0)]   # the rounded edge
+    inset, last = h, min(a, b_) - 0.004
+    while inset + 0.012 < last:
+        inset += 0.012
+        rings.append((inset, h))
+    rings.append((last, h))
+    bm = bmesh.new()
+    uv = bm.loops.layers.uv.new()
+    def layer(sign):
+        out = []
+        for i, (ins, up) in enumerate(rings):
+            if sign < 0 and i == 0:
+                out.append(top[0])                       # both halves share the rim
+                continue
+            ring = []
+            for px, pz in outline(ins):
+                wob = noise.noise(Vector((px * 35 + seed * 7.3, pz * 35, seed * 3.1 + sign))) * 0.0007 * min(1.0, ins / h)
+                ring.append(bm.verts.new(V(px, h + sign * up + wob, pz)))
+            out.append(ring)
+        return out
+    top = layer(1)
+    bottom = layer(-1)
+    for half in (top, bottom):
+        for r0, r1 in zip(half, half[1:]):
+            for k in range(N):
+                bm.faces.new((r0[k], r0[(k + 1) % N], r1[(k + 1) % N], r1[k]))
+        bm.faces.new(half[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    for f in bm.faces:
+        for loop in f.loops:
+            co = loop.vert.co                            # Blender x, y = viewer x, -z
+            loop[uv].uv = (co.x / TOWEL_TILE, co.y / TOWEL_TILE)
+    return finish(name, bm, mat, e, (x, y, z), rot=(0, 0, ry), smooth=lambda p: True)
 
 def towels(e):
-    for i in range(3):
-        box(f'Towel {i}', 0.3 - i * 0.008, 0.04, 0.21, M['grey_cloth'] if i == 1 else M['orange_cloth'], e,
-            (i - 1) * 0.006, 0.02 + i * 0.041, 0, ry=(i - 1) * 0.05, bevel=0.016)
+    """Three folded towels, about an inch tall together."""
+    orange, grey = '#ff7a26', '#a6a8ad'
+    mats = {c: towel_mat(n, c) for n, c in (('Towel orange', orange), ('Towel grey', grey))}
+    t = 0.0085
+    for i, (color, w, d) in enumerate(((orange, 0.300, 0.210), (grey, 0.296, 0.206), (orange, 0.292, 0.203))):
+        towel(f'Towel {i}', e, mats[color], w, d, t, (i - 1) * 0.005, i * t, (1 - i) * 0.003, ry=(i - 1) * 0.045, seed=i + 1)
 
 def detail_brush(e, s=1.0):
     cyl('Brush handle', 0.011 * s, 0.014 * s, 0.14 * s, M['black_gloss'], e, 0, -0.07 * s, 0, seg=16)
@@ -650,30 +760,6 @@ def wash_mitt(e):
                (nx / nn + rnd.uniform(-0.15, 0.15), ny / nn + rnd.uniform(-0.15, 0.15), rnd.uniform(-0.45, 0.4)))
     fibres('Mitt noodles', strands, e, sides=5, root=0.5)
 
-def blower(e):
-    box('Blower body', 0.3, 0.2, 0.2, M['black_gloss'], e, 0, 0.12, 0, bevel=0.035)
-    box('Blower band', 0.305, 0.05, 0.205, M['orange'], e, 0, 0.07, 0, bevel=0.018)
-    cyl('Blower vent', 0.07, 0.07, 0.01, M['dark_steel'], e, 0.153, 0.13, 0, axis='x', seg=24)
-    torus('Blower handle', 0.07, 0.012, M['black_gloss'], e, 0, 0.215, 0, arc=PI, seg=20, rseg=10, rot=(PI / 2, 0, PI / 2))
-    cu = bpy.data.curves.new('Blower hose', 'CURVE')
-    cu.dimensions = '3D'
-    cu.bevel_depth = 0.022
-    cu.bevel_resolution = 4
-    sp = cu.splines.new('NURBS')
-    pts = [(-0.15, 0.13, 0), (-0.26, 0.14, 0.03), (-0.32, 0.05, 0.12), (-0.22, 0.03, 0.22), (-0.05, 0.03, 0.2)]
-    sp.points.add(len(pts) - 1)
-    for p, c in zip(sp.points, pts):
-        p.co = (*V(*c), 1.0)
-    sp.use_endpoint_u = True
-    sp.order_u = 3
-    hose = bpy.data.objects.new('Blower hose', cu)
-    cu.materials.append(M['rubber'])
-    hose.parent = e
-    COL.objects.link(hose)
-    cyl('Blower nozzle', 0.014, 0.024, 0.12, M['orange'], e, 0.03, 0.03, 0.2, axis='x', seg=16)
-    for k, (x, z_) in enumerate(((-0.11, -0.07), (0.11, -0.07), (-0.11, 0.07), (0.11, 0.07))):
-        cyl(f'Blower foot {k}', 0.015, 0.015, 0.02, M['rubber'], e, x, 0.01, z_, seg=12)
-
 # ---------------------------------------------------------------- back wall: bench + pegboard
 use('Furniture')
 BW, BD, BH = 3.0, 0.66, 0.92
@@ -705,13 +791,11 @@ cyl('Bench bucket rim', 0.155, 0.155, 0.015, M['orange'], bk, 0, 0.27, 0, seg=36
 # a little bench-top life: rag, tape measure, spray-trigger-free clutter
 box('Bench rag', 0.22, 0.012, 0.16, M['grey_cloth'], bench, -1.25, BH + 0.006, 0.14, ry=0.4, bevel=0.005)
 use('Props')
-box('Tape measure', 0.07, 0.07, 0.035, M['orange'], bench, 0.42, BH + 0.035, 0.2, ry=0.5, bevel=0.012)
-box('Power strip', 0.3, 0.035, 0.055, M['white'], bench, -0.2, BH + 0.0175, -0.27, bevel=0.006)
 
 use('Products')
-foam_cannon(slot('foam-cannon', 'foam_cannon', bench, -0.95, BH, 0.02, 0.5, 0.3))
-foam_master(slot('foam-master', 'pump_foamer', bench, -0.55, BH, -0.06, -0.3, 0.4))
-towels(slot('towels', 'towel_stack', bench, 0.15, BH, 0.04, 0.12, 0.2))
+f11 = slot('foam-cannon', 'boxed', bench, -0.95, BH, 0.02, 0.22, 0.27)      # boxes are built further down
+f5 = slot('foam-master', 'boxed', bench, -0.55, BH, -0.06, -0.14, 0.41)
+towels(slot('towels', 'towel_stack', bench, 0.15, BH, 0.04, 0.12, 0.12))
 slot('leather', 'spray_bottle', bench, 0.72, BH, 0.0, -0.2)
 
 use('Furniture')
@@ -874,7 +958,7 @@ for sz in (-1, 1):
         cyl(f'Chest caster {k}', 0.05, 0.05, 0.035, M['rubber'], chest, sx * 0.19, 0.05, sz * 0.44, axis='x', seg=20, bevel=0.005)
         k += 1
 use('Products')
-blower(slot('blower', 'blower', chest, -0.02, 0.93, 0.1, -PI / 2 + 0.25, 0.34))
+jd = slot('blower', 'boxed', chest, -0.02, 0.93, 0.1, -PI / 2 + 0.25, 0.36)     # the boxed blower is built further down
 
 use('Furniture')
 # Supplied model: wooden swivel stool (inches, 30" tall).
@@ -1358,6 +1442,122 @@ use('Live props')        # see-through, so lit live like the products rather tha
 for name, z_, ry, liquid in (('Jug orange', 0.35, PI / 2, '#f5c79a'), ('Jug clear', 0.55, PI / 2 + 0.2, '#dfe7e8')):
     moulded_jug(name, empty(name, shelves, 0.14, 1.6375, z_, ry), liquid, brand_label(), milk='#eeebe4')
 
+# ---------------------------------------------------------------- retail boxes
+# A product shown in its shop packaging: a plain carton with the flat print artwork (the
+# die line, all panels on one sheet) folded onto it. Each face takes its own rectangle of
+# the sheet, given in the artwork's pixels as (left, top, right, bottom).
+def carton(name, e, art, sheet, panels, w, h, d, inset=2):
+    """w across the front, h tall, d front to back (metres). panels: front, right, back,
+    left, top, bottom. Left and right are as seen when facing the front."""
+    sw, sh = sheet
+    x0, x1, z0, z1 = -w / 2, w / 2, -d / 2, d / 2
+    corners = {   # each face anticlockwise seen from outside, starting bottom-left as printed
+        'front': ((x0, 0, z1), (x1, 0, z1), (x1, h, z1), (x0, h, z1)),
+        'right': ((x1, 0, z1), (x1, 0, z0), (x1, h, z0), (x1, h, z1)),
+        'back': ((x1, 0, z0), (x0, 0, z0), (x0, h, z0), (x1, h, z0)),
+        'left': ((x0, 0, z0), (x0, 0, z1), (x0, h, z1), (x0, h, z0)),
+        'top': ((x0, h, z1), (x1, h, z1), (x1, h, z0), (x0, h, z0)),
+        'bottom': ((x0, 0, z0), (x1, 0, z0), (x1, 0, z1), (x0, 0, z1)),
+    }
+    bm = bmesh.new()
+    uv = bm.loops.layers.uv.new()
+    for face, quad in corners.items():
+        l, t, r, b = panels[face]
+        l, t, r, b = l + inset, t + inset, r - inset, b - inset      # stay clear of the fold lines and the next panel
+        f = bm.faces.new([bm.verts.new(V(*c)) for c in quad])
+        for loop, (px, py) in zip(f.loops, ((l, b), (r, b), (r, t), (l, t))):
+            loop[uv].uv = (px / sw, 1 - py / sh)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    m, nt, bsdf = new_mat(f'Carton {name}')
+    img = bpy.data.images.load(art, check_existing=True)
+    img.pack()
+    tex = nt.nodes.new('ShaderNodeTexImage')
+    tex.image = img
+    nt.links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
+    bsdf.inputs['Roughness'].default_value = 0.38       # laminated print: a soft sheen, not a mirror
+    bsdf.inputs['Coat Weight'].default_value = 0.25
+    return finish(name, bm, m, e, (0, 0, 0))
+
+use('Products')
+# Panel edges are read off each die line (fold lines in the artwork's pixels). The folded
+# height is the one measurement supplied; it fixes the millimetres per pixel, and the width
+# and depth follow from the folds. F11's bottom flaps are shorter than the box is deep, so
+# its bottom panel is only part-covered - it is the face nobody sees.
+BOXES = [   # anchor, artwork name, sheet size, fold columns (4 panels), top fold rows, bottom rows, w, h, d
+    (jd, 'JD Jet Car Blower', (2500, 1641), (8, 385, 1227, 1603, 2446), (70, 446), (1198, 1574), 0.291, 0.260, 0.130),
+    (f11, 'F11 Dual Chamber Foam Cannon', (2500, 1567), (9, 456, 1216, 1663, 2423), (82, 526), (1256, 1553), 0.195, 0.187, 0.1145),
+    (f5, 'f5 Foam Master', (2500, 2145), (11, 609, 1207, 1805, 2397), (93, 691), (1742, 2138), 0.186, 0.327, 0.186),
+]
+for anchor, art_name, sheet, (xa, xf, xr, xb, xe), (yt0, yt1), (yb0, yb1), bw, bh, bd in BOXES:
+    art = sorted(glob.glob(os.path.join(HERE, '2D assets', art_name + 'Asset*.png')))
+    label = art_name.split(' ')[0].upper() + ' box'
+    if art:
+        carton(label, anchor, art[0], sheet, dict(
+            left=(xa, yt1, xf, yb0), front=(xf, yt1, xr, yb0), right=(xr, yt1, xb, yb0), back=(xb, yt1, xe, yb0),
+            top=(xf, yt0, xr, yt1), bottom=(xf, yb0, xr, yb1)), bw, bh, bd)
+    else:
+        box(label, bw, bh, bd, M['sign'], anchor, 0, bh / 2, 0, bevel=0.002)      # no artwork here: plain black carton
+
+# ---------------------------------------------------------------- architect's lamp on the tool chest
+# A black swing-arm desk lamp aimed at the boxed blower. Lit live like the products (so it
+# shows without a rebake); 'Lamp spot' and 'Lamp aim' tell the browser where its light sits
+# and points, and the Blender spot below gives the baked chest top and wall the same pool.
+def rod(name, a, b, r, mat, parent, seg=12, r2=None):
+    """Round bar from a to b (viewer coords relative to the parent); r2 = radius at b."""
+    a, b = Vector(a), Vector(b)
+    d = Vector(V(*b)) - Vector(V(*a))
+    mid = (a + b) / 2
+    return cyl(name, r if r2 is None else r2, r, d.length, mat, parent, mid.x, mid.y, mid.z,
+               seg=seg, bevel=0, rot=d.to_track_quat('Z', 'Y').to_euler())
+
+def arch_lamp(parent, base, elbow, head, target):
+    blk, spring_mat = M['black_gloss'], M['dark_steel']
+    bx, by, bz = base
+    cyl('Lamp base', 0.078, 0.086, 0.016, blk, parent, bx, by + 0.008, bz, seg=40, bevel=0.003)
+    foot = Vector((bx, by + 0.075, bz))
+    rod('Lamp post', (bx, by + 0.016, bz), foot, 0.007, blk, parent)
+    elbow, head, target = Vector(elbow), Vector(head), Vector(target)
+    def arm(tag, a, b, spring):
+        along = (b - a).normalized()
+        side = along.cross(Vector((0, 1, 0))).normalized() * 0.011
+        for k, sgn in enumerate((-1, 1)):
+            rod(f'Lamp {tag} bar {k}', a + side * sgn, b + side * sgn, 0.0035, blk, parent, seg=8)
+        lift = side.cross(along).normalized() * 0.013
+        rod(f'Lamp {tag} spring', a.lerp(b, spring[0]) + lift, a.lerp(b, spring[1]) + lift, 0.0045, spring_mat, parent, seg=8)
+    arm('lower', foot, elbow, (0.04, 0.42))
+    arm('upper', elbow, head, (0.02, 0.38))
+    for tag, p in (('foot', foot), ('elbow', elbow), ('head', head)):
+        sphere(f'Lamp joint {tag}', 0.014, blk, parent, p.x, p.y, p.z)
+    aim = (target - head).normalized()
+    neck = head + aim * 0.03
+    cap = neck + aim * 0.045
+    mouth = cap + aim * 0.085
+    rod('Lamp neck', head, neck, 0.011, blk, parent)
+    rod('Lamp shade cap', neck, cap, 0.028, blk, parent, seg=28)
+    rod('Lamp shade', cap, mouth, 0.028, blk, parent, seg=40, r2=0.078)
+    rod('Lamp glow', mouth - aim * 0.004, mouth + aim * 0.0006, 0.069, M['bulb'], parent, seg=32)
+    empty('Lamp spot', parent, mouth.x, mouth.y, mouth.z)
+    empty('Lamp aim', parent, target.x, target.y, target.z)
+    prev = COL
+    use('Lights')
+    ld = bpy.data.lights.new('Lamp light', 'SPOT')
+    ld.energy = 8.96
+    ld.color = (1.0, 0.85, 0.68)
+    ld.spot_size = math.radians(100)
+    ld.spot_blend = 0.45
+    ld.shadow_soft_size = 0.03
+    lo = bpy.data.objects.new('Lamp light', ld)
+    lo.location = V(*(mouth + aim * 0.01))
+    lo.rotation_euler = Vector(V(*aim)).to_track_quat('-Z', 'Y').to_euler()
+    lo.parent = parent
+    COL.objects.link(lo)
+    globals()['COL'] = prev
+
+use('Live props')
+# chest-top coordinates: the lamp stands to the left of the box (seen from the room) and
+# reaches forward past the front edge, so its light falls across the front and the left side
+arch_lamp(chest, base=(-0.02, 0.93, -0.3254), elbow=(0.0, 1.32, -0.4454), head=(-0.32, 1.44, -0.1654), target=(-0.083, 1.06, 0.116))
+
 # ---------------------------------------------------------------- sun, sky, cameras
 use('Lights')
 sun_dir = V(math.sin(SUN_AZIM) * math.cos(SUN_ELEV), math.sin(SUN_ELEV), math.cos(SUN_AZIM) * math.cos(SUN_ELEV))
@@ -1409,6 +1609,12 @@ cams = {
     'brushes': camera('Cam detail brushes', (-0.73, 1.74, -2.3), 0.0, 0.0, 35),
     'mitt': camera('Cam detail mitt', (-1.35, 1.4, -2.2), -0.63, -0.08, 40),
     'tirebrush': camera('Cam detail tire brush', (-0.62, 1.74, -2.85), 0.34, -0.12, 50),
+    'box': camera('Cam detail box', (0.7, 1.45, -0.95), 1.499, -0.21, 32),
+    'corner': camera('Cam back-left corner', (-1.95, 1.65, -2.45), 2.730, -0.055),
+    'cornerin': camera('Cam door-side corner looking in', (-2.05, 1.65, 3.05), 0.413, -0.068),
+    'outside': camera('Cam driveway looking in', (0.0, 1.6, 6.6), 0.0, -0.03, 20),
+    'boxes': camera('Cam detail bench boxes', (-1.05, 1.35, -1.95), 0.0, -0.2, 30),
+    'towels': camera('Cam detail towels', (-0.2, 1.22, -2.5), 0.0, -0.5, 40),
     'jug': camera('Cam detail jug', (-HW + 0.9, 1.36, -0.80), -1.453, -0.065, 40),
     'jugside': camera('Cam detail jug side', (-HW + 0.6, 1.36, -0.35), -0.705, -0.07, 40),
 }

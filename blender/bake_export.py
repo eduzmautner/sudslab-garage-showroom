@@ -63,6 +63,22 @@ OUTDOORS = ('plants', 'fence', 'exterior')
 
 bpy.ops.wm.open_mainfile(filepath=os.path.join(HERE, 'garage.blend'))
 scene = bpy.context.scene
+
+# Textures kept outside the scene file (the stool's oak veneer). The scene refers to them
+# with Windows separators, which a Linux machine does not resolve, so each one that is not
+# found is looked up by the same relative path next to this script. A texture that is still
+# missing stops the bake: Blender would otherwise bake it bright magenta without complaint.
+for im in bpy.data.images:
+    if im.source != 'FILE' or im.packed_file or not im.users:
+        continue
+    if os.path.exists(bpy.path.abspath(im.filepath)):
+        continue
+    beside = os.path.join(HERE, *im.filepath.replace('\\', '/').lstrip('/').split('/'))
+    if not os.path.exists(beside):
+        sys.exit(f'BAKE: texture file missing: {im.filepath} (looked in {beside})')
+    im.filepath = beside
+    im.reload()
+    log(f'texture found beside the script: {os.path.basename(beside)}')
 if '--dry' in ARGS:                    # a dry run must not touch the live web files
     import tempfile
     OUT = tempfile.mkdtemp()
@@ -72,15 +88,27 @@ for a in ARGS:                         # --out=DIR: write the web files somewher
 os.makedirs(OUT, exist_ok=True)
 
 def gpu():
-    try:
-        prefs = bpy.context.preferences.addons['cycles'].preferences
-        prefs.compute_device_type = 'OPTIX'
-        prefs.get_devices()
-        for d in prefs.devices:
-            d.use = d.type == 'OPTIX'
-        scene.cycles.device = 'GPU'
-    except Exception as e:
-        log(f'GPU setup failed, using CPU: {e}')
+    """Render on the graphics card: OptiX if the driver offers it, else CUDA (a rented Linux
+    machine may expose only CUDA). --require-gpu stops instead of quietly baking on the CPU,
+    which on a machine billed by the hour would be slow and expensive."""
+    prefs = bpy.context.preferences.addons['cycles'].preferences
+    for kind in ('OPTIX', 'CUDA'):
+        try:
+            prefs.compute_device_type = kind
+            prefs.get_devices()
+            cards = [d for d in prefs.devices if d.type == kind]
+        except Exception as e:
+            log(f'{kind} not usable: {e}')
+            continue
+        if cards:
+            for d in prefs.devices:
+                d.use = d.type == kind
+            scene.cycles.device = 'GPU'
+            log(f'rendering with {kind} on ' + ', '.join(d.name for d in cards))
+            return
+    if '--require-gpu' in ARGS:
+        sys.exit('BAKE: no usable graphics card found and --require-gpu was given')
+    log('no usable graphics card found, rendering on the CPU')
 gpu()
 scene.render.engine = 'CYCLES'
 
@@ -363,6 +391,7 @@ for name, ob, img in baked:
     select_only([ob])
     log(f'{name}: baking {img.size[0]}px at {SAMPLES} samples...')
     bpy.ops.object.bake(type='COMBINED')
+    log(f'{name}: rendered and denoised')           # graphics-card work ends here; the rest is CPU
     # the lawn runs on under the driveway slab, where a little light leaks in: a higher cut-off
     covered, kept = clean_edges(img, hidden_below={'exterior': 0.01}.get(name, 1e-4) if name in OUTDOORS else None)
     log(f'{name}: edges cleaned ({covered * 100:.0f}% of the sheet is baked surface, {kept * 100:.0f}% interior)')

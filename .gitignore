@@ -12,3 +12,6 @@ blender/3D assets/
 Inspo images/
 blender/2D assets/
 blender/textures/baked_*.uv.npy
+
+# Local-only: a test bake staged for the side-by-side comparison page
+public/garage/_cloud/

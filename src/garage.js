@@ -29,6 +29,11 @@ const PENDANT_INTENSITY = 0.2;
 // one used here clips to a pale coral, so the intensity is set by eye instead.
 const SUN = { elevation: 15, azimuth: 20, intensity: 1.6, color: new THREE.Color(1.0, 0.83, 0.62) };
 
+// The architect's lamp on the tool chest: a spot for the live-lit objects under it. Its
+// position and aim come from two markers in products.glb ('Lamp spot', 'Lamp aim'), so
+// moving the lamp in blender/build_garage.py moves the light too. Intensity is set by eye.
+const LAMP = { color: 0xffd6a6, intensity: 0.232, angle: 0.85, penumbra: 0.6 };
+
 // See-through liquids: how far light travels through the bottle (m), the distance over
 // which it takes on the liquid's full colour (shorter = deeper colour), and how
 // see-through a strongly coloured liquid is (0 = solid, 1 = fully clear).
@@ -127,6 +132,16 @@ export async function loadGarage(scene, renderer, base, packed = false) {
     const lamp = new THREE.PointLight(0xffc78c, PENDANT_INTENSITY, 0, 2);
     lamp.position.set(...p);
     scene.add(lamp);
+  }
+
+  const lampAt = products.scene.getObjectByName('Lamp_spot');
+  const lampAim = products.scene.getObjectByName('Lamp_aim');
+  if (lampAt && lampAim) {
+    products.scene.updateMatrixWorld(true);
+    const lamp = new THREE.SpotLight(LAMP.color, LAMP.intensity, 0, LAMP.angle, LAMP.penumbra, 2);
+    lampAt.getWorldPosition(lamp.position);
+    lampAim.getWorldPosition(lamp.target.position);
+    scene.add(lamp, lamp.target);
   }
 
   // The same sun the bake used, for the live-lit objects. The room casts shadows on
