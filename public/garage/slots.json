@@ -4,7 +4,7 @@
     "kind": "boxed",
     "object": "slot_foam-cannon",
     "position": [
-      -1.3,
+      -1.31,
       0.92,
       -3.02
     ],
@@ -17,12 +17,25 @@
     "kind": "boxed",
     "object": "slot_foam-master",
     "position": [
-      -0.9,
+      -1.01,
       0.92,
       -3.1
     ],
     "rotationY": -0.14,
     "hotspotOffsetY": 0.41,
+    "model": null
+  },
+  {
+    "slot": "f1-foam-cannon",
+    "kind": "model",
+    "object": "slot_f1-foam-cannon",
+    "position": [
+      -0.75,
+      0.92,
+      -3.01
+    ],
+    "rotationY": -0.6654,
+    "hotspotOffsetY": 0.32,
     "model": null
   },
   {
@@ -50,19 +63,6 @@
     "rotationY": -0.2,
     "hotspotOffsetY": 0.34,
     "model": "12oz-spray-bottle.obj"
-  },
-  {
-    "slot": "boar-brush",
-    "kind": "detail_brush",
-    "object": "slot_boar-brush",
-    "position": [
-      -1.55,
-      1.895,
-      -3.33
-    ],
-    "rotationY": 0.0,
-    "hotspotOffsetY": -0.1,
-    "model": null
   },
   {
     "slot": "wheel-brush",
@@ -101,6 +101,19 @@
     ],
     "rotationY": 0.0,
     "hotspotOffsetY": -0.12,
+    "model": null
+  },
+  {
+    "slot": "boar-brush",
+    "kind": "boar_brush",
+    "object": "slot_boar-brush",
+    "position": [
+      -1.55,
+      1.76,
+      -3.315
+    ],
+    "rotationY": 0.0,
+    "hotspotOffsetY": 0.165,
     "model": null
   },
   {

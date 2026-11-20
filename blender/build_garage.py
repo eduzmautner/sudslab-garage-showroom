@@ -760,6 +760,126 @@ def wash_mitt(e):
                (nx / nn + rnd.uniform(-0.15, 0.15), ny / nn + rnd.uniform(-0.15, 0.15), rnd.uniform(-0.45, 0.4)))
     fibres('Mitt noodles', strands, e, sides=5, root=0.5)
 
+def lathe(name, profile, mat, parent, x, y, z, seg=48, closed=False, sharp=35):
+    """Surface of revolution about the upright axis. profile: (radius, height) pairs; closed
+    joins the last pair back to the first (a ring with a hole through it)."""
+    bm = bmesh.new()
+    rings = [[bm.verts.new((r * math.cos(2 * PI * k / seg), r * math.sin(2 * PI * k / seg), h)) for k in range(seg)]
+             for r, h in profile]
+    for a, b in zip(rings, rings[1:] + (rings[:1] if closed else [])):
+        for k in range(seg):
+            bm.faces.new((a[k], a[(k + 1) % seg], b[(k + 1) % seg], b[k]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    ob = finish(name, bm, mat, parent, (x, y, z), smooth=lambda p: True)
+    ob.data.set_sharp_from_angle(angle=math.radians(sharp))
+    return ob
+
+GRIP_PITCH = 0.0026                  # spacing of the dimples on the brush grip (m)
+def grip_mat():
+    """Black rubber with rows of shallow round dimples. The dimples are a small tiling normal
+    map (one repeat = one pitch across, sqrt(3) pitches up, which holds two staggered rows)."""
+    if 'Brush grip rubber' in bpy.data.materials:
+        return bpy.data.materials['Brush grip rubber']
+    n = 128
+    u, v = np.meshgrid((np.arange(n) + 0.5) / n, (np.arange(n) + 0.5) / n)
+    height = np.zeros((n, n), np.float32)
+    for cu, cv in ((0.5, 0.25), (0.0, 0.75), (1.0, 0.75)):
+        d = np.hypot(u - cu, (v - cv) * math.sqrt(3))                  # distance in pitches
+        height -= np.clip(1 - (d / 0.3) ** 2, 0, 1)                    # a bowl 0.3 pitch in radius
+    k = 0.25e-3 / (2 * GRIP_PITCH / n)                                 # bowls 0.25 mm deep
+    dx = (np.roll(height, -1, 1) - np.roll(height, 1, 1)) * k
+    dy = (np.roll(height, -1, 0) - np.roll(height, 1, 0)) * k / math.sqrt(3)
+    nrm = np.stack([-dx, -dy, np.ones_like(dx)], -1)
+    nrm /= np.linalg.norm(nrm, axis=-1, keepdims=True)
+    m, nt, b = new_mat('Brush grip rubber')
+    tex = nt.nodes.new('ShaderNodeTexImage')
+    tex.image = towel_image('grip_dimple_normal', nrm * 0.5 + 0.5, data=True)
+    nm = nt.nodes.new('ShaderNodeNormalMap')
+    nt.links.new(tex.outputs['Color'], nm.inputs['Color'])
+    nt.links.new(nm.outputs['Normal'], b.inputs['Normal'])
+    b.inputs['Base Color'].default_value = lin('#171717')
+    b.inputs['Roughness'].default_value = 0.6
+    m.diffuse_color = lin('#171717')
+    return m
+
+def boar_brush(e):
+    """Elite Boar's Hair Detailing Brush: a short round brush hanging bristles-down in its
+    cradle. Domed rubber grip with ten orange ribs and an orange cap, black collar, and a
+    flared head of natural hair. Origin = underside of the cradle's feet; front = +z."""
+    blk = M['black']
+    TIP, LEN = 0.006, 0.052                     # the bristle tips hang 6 mm clear of the ledge
+    y_f = TIP + LEN                             # underside of the ferrule
+    y_c = y_f + 0.012                           # underside of the collar
+    y_h = y_c + 0.007                           # underside of the grip
+    cyl('Boar brush ferrule', 0.0225, 0.0215, 0.012, blk, e, 0, y_f + 0.006, 0, seg=40, bevel=0.001)
+    cyl('Boar brush collar', 0.0325, 0.0325, 0.007, blk, e, 0, y_c + 0.0035, 0, seg=48, bevel=0.002)
+
+    # --- grip: rings up the dome; each of the ten sectors is an orange rib (2 faces wide)
+    # and a black panel (3 faces wide), and the rib takes more of the sector toward the top
+    SECT, R_BOT, R_MAX, R_CAP, HH, T0 = 10, 0.028, 0.0305, 0.015, 0.045, 0.27
+    prof = [(R_MAX - (R_MAX - R_BOT) * (1 - i / 4) ** 2, HH * T0 * i / 4) for i in range(5)]
+    prof += [(R_CAP + (R_MAX - R_CAP) * math.cos(PI / 2 * i / 12), HH * (T0 + (1 - T0) * math.sin(PI / 2 * i / 12)))
+             for i in range(1, 13)]
+    bm = bmesh.new()
+    uv = bm.loops.layers.uv.new()
+    rings, run = [], 0.0
+    for i, (r, h) in enumerate(prof):
+        if i:
+            run += math.hypot(r - prof[i - 1][0], h - prof[i - 1][1])
+        half = (0.24 + 0.4 * (h / HH) ** 1.5) * PI / SECT          # half-angle of the orange rib
+        span = 2 * PI / SECT - 2 * half
+        offs = (-half, 0, half, half + span / 3, half + 2 * span / 3, half + span)   # the last is the next rib's edge
+        verts = []
+        for s in range(SECT):
+            for off in offs[:5]:
+                a = 2 * PI * s / SECT + off
+                rr = r + (0.0007 if off == 0 else 0)                # the rib stands a touch proud
+                verts.append(bm.verts.new((rr * math.sin(a), -rr * math.cos(a), h)))
+        # dimple coordinates: sideways distance from the middle of the black panel, and the run up the dome
+        st = [((off - PI / SECT) * r / GRIP_PITCH, run / (GRIP_PITCH * math.sqrt(3))) for off in offs]
+        rings.append((verts, st))
+    n = SECT * 5
+    for (va, sa), (vb, sb) in zip(rings, rings[1:]):
+        for k in range(n):
+            k2, j = (k + 1) % n, k % 5
+            f = bm.faces.new((va[k], va[k2], vb[k2], vb[k]))
+            f.material_index = 0 if j < 2 else 1
+            f.smooth = True
+            for loop, st in zip(f.loops, (sa[j], sa[j + 1], sb[j + 1], sb[j])):
+                loop[uv].uv = st
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    grip = finish('Boar brush grip', bm, M['orange'], e, (0, y_h, 0))
+    grip.data.materials.append(grip_mat())
+    top = y_h + HH
+    cyl('Boar brush cap', 0.0135, 0.0154, 0.004, M['orange'], e, 0, top + 0.0015, 0, seg=40, bevel=0.0012)
+    torus('Boar brush cap ring', 0.0078, 0.0007, M['orange'], e, 0, top + 0.0035, 0, seg=32, rseg=6)
+
+    # --- cradle: a ring under the collar carried by two side legs
+    lathe('Boar brush stand ring', [(0.0235, y_c - 0.007), (0.036, y_c - 0.007), (0.036, y_c - 0.0005), (0.0235, y_c - 0.0005)],
+          blk, e, 0, 0, 0, closed=True)
+    for sx, tag in ((-1, 'L'), (1, 'R')):
+        box(f'Boar brush stand leg {tag}', 0.006, y_c + 0.012, 0.028, blk, e, sx * 0.044, (y_c + 0.012) / 2, 0, bevel=0.002)
+        box(f'Boar brush stand lug {tag}', 0.012, 0.0065, 0.022, blk, e, sx * 0.0385, y_c - 0.00375, 0, bevel=0.001)
+        box(f'Boar brush stand foot {tag}', 0.014, 0.008, 0.06, blk, e, sx * 0.044, 0.004, 0, bevel=0.003)
+
+    # --- hair: packed at the ferrule, flaring to the tips, shorter round the outside
+    cyl('Boar brush core', 0.019, 0.028, 0.04, plain('Boar brush core', '#5b4e3e', 1.0), e, 0, 0.036, 0, seg=24, bevel=0)
+    state = FIBRE_RNG.getstate()                 # leave the shared generator as found: the mitt is built after this
+    rnd, strands = FIBRE_RNG, []
+    codes = [c for c, share in (('#a8967a', 28), ('#857560', 24), ('#cfc0a2', 16), ('#5a4d40', 20), ('#332b25', 12))
+             for _ in range(share)]
+    N = 2400                                     # fine hair: many thin strands, or it reads as a broom
+    for i in range(N):
+        s = ((i + rnd.random()) / N) ** 0.45                         # 0 = centre, 1 = outside; crowded toward the outside
+        ang = i * 2.39996 + rnd.uniform(-0.2, 0.2)
+        a2 = ang + rnd.uniform(-0.06, 0.06)
+        rr, rt = 0.0205 * s, 0.036 * s * rnd.uniform(0.94, 1.05)
+        tip_y = TIP + 0.005 * s ** 4 + rnd.uniform(-0.002, 0.004)
+        strands.append(((rr * math.cos(ang), y_f + 0.003, rr * math.sin(ang)), (rt * math.cos(a2), tip_y, rt * math.sin(a2)),
+                        0.0008, 0.00035, rnd.choice(codes)))
+    fibres('Boar brush bristles', strands, e, root=0.45)
+    FIBRE_RNG.setstate(state)
+
 # ---------------------------------------------------------------- back wall: bench + pegboard
 use('Furniture')
 BW, BD, BH = 3.0, 0.66, 0.92
@@ -793,8 +913,11 @@ box('Bench rag', 0.22, 0.012, 0.16, M['grey_cloth'], bench, -1.25, BH + 0.006, 0
 use('Props')
 
 use('Products')
-f11 = slot('foam-cannon', 'boxed', bench, -0.95, BH, 0.02, 0.22, 0.27)      # boxes are built further down
-f5 = slot('foam-master', 'boxed', bench, -0.55, BH, -0.06, -0.14, 0.41)
+# the three foam cannons stand as one group, tallest in the middle; the boxes and the F1
+# model are built further down
+f11 = slot('foam-cannon', 'boxed', bench, -0.96, BH, 0.02, 0.22, 0.27)
+f5 = slot('foam-master', 'boxed', bench, -0.66, BH, -0.06, -0.14, 0.41)
+f1 = slot('f1-foam-cannon', 'model', bench, -0.40, BH, 0.03, -PI / 4 + 0.12, 0.32)   # label to the room, nozzle front-left
 towels(slot('towels', 'towel_stack', bench, 0.15, BH, 0.04, 0.12, 0.12))
 slot('leather', 'spray_bottle', bench, 0.72, BH, 0.0, -0.2)
 
@@ -810,14 +933,17 @@ def hook(x, y):
     cyl('Peg hook', 0.004, 0.004, 0.05, M['steel'], peg, x, y, 0.035, axis='z', seg=8, bevel=0)
 use('Products')
 for sid, kind, fn, x, y, dy in (
-    ('boar-brush', 'detail_brush', lambda e: detail_brush(e), -1.2, 0.86, -0.1),
     ('wheel-brush', 'wheel_brush', lambda e: wheel_brush(e, False), -0.66, 0.92, -0.17),
     ('mf-wheel-brush', 'wheel_brush', lambda e: wheel_brush(e, True), -0.4, 0.92, -0.17),
     ('tire-brush', 'tire_brush', tire_brush, -0.1, 0.84, -0.12),
 ):
     hook(x, y)
     fn(slot(sid, kind, peg, x, y - 0.005, 0.04, 0, dy))
+# the boar's hair brush is short and round and lives in its own stand, so it gets a small ledge
+boar_brush(slot('boar-brush', 'boar_brush', peg, -1.2, 0.72, 0.055, 0, 0.165))
 use('Props')
+# a plain floating shelf, no brackets; named 'Peg shelf ...' so it is baked on the sharp sheet with the pegboard
+box('Peg shelf brush ledge', 0.16, 0.014, 0.09, M['shelf'], peg, -1.2, 0.713, 0.055, bevel=0.002)
 for x, s in ((-1.06, 0.85), (-0.94, 0.7)):
     hook(x, 0.86)
     detail_brush(empty('Spare brush', peg, x, 0.855, 0.04), s)
@@ -1498,6 +1624,92 @@ for anchor, art_name, sheet, (xa, xf, xr, xb, xe), (yt0, yt1), (yb0, yb1), bw, b
     else:
         box(label, bw, bh, bd, M['sign'], anchor, 0, bh / 2, 0, bevel=0.002)      # no artwork here: plain black carton
 
+# ---------------------------------------------------------------- F1 Professional Foam Cannon (supplied model)
+# Rhino export in millimetres: bottle axis on the origin, standing on z = 0, nozzle toward
+# -Y (the room). It is ~113k faces, most of them in threads and fittings nobody sees, so
+# each material is welded and thinned on its own: the smooth bottle and nozzle keep the
+# most, the brass internals very little.
+F1_KEEP = {'Physically Based': 0.3, 'Plastic Red': 0.25, 'Plastic': 0.2, 'Metal': 0.08, 'Metal (1)': 0.15}
+F1_TURN = PI / 4            # the bottle screws on at any angle: its plain panel sits 45 degrees round from the nozzle
+F1_LABEL = (0.030, 0.080)   # sticker radius, and the height of its centre above the base (m)
+
+def f1_cannon(e):
+    src = import_obj('F1-Professional-Foam-Cannon.obj')
+    me = src.data
+    me.transform(Matrix.Scale(0.001, 4))
+    names = [m.name.split('.')[0] for m in me.materials]      # Blender adds .001 when a name is already taken
+    full = len(me.polygons)
+    out = bmesh.new()
+    for i, nm in enumerate(names):
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.material_index != i], context='FACES')
+        bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=2e-5)       # the export is loose patches; join them so thinning cannot open seams
+        if nm == 'Physically Based':
+            bmesh.ops.rotate(bm, verts=bm.verts[:], cent=(0, 0, 0), matrix=Matrix.Rotation(F1_TURN, 3, 'Z'))
+        part = bpy.data.meshes.new('F1 part')
+        bm.to_mesh(part)
+        bm.free()
+        ob = bpy.data.objects.new('F1 part', part)
+        COL.objects.link(ob)
+        ob.modifiers.new('Decimate', 'DECIMATE').ratio = F1_KEEP[nm]
+        thin = bpy.data.meshes.new_from_object(ob.evaluated_get(bpy.context.evaluated_depsgraph_get()))
+        out.from_mesh(thin)
+        bpy.data.objects.remove(ob)
+        bpy.data.meshes.remove(part)
+        bpy.data.meshes.remove(thin)
+    bpy.data.objects.remove(src)
+    final = bpy.data.meshes.new('F1 foam cannon')
+    out.to_mesh(final)
+    out.free()
+    # the model's own normals do not survive the thinning: smooth everywhere, creased at real edges
+    if 'custom_normal' in final.attributes:
+        final.attributes.remove(final.attributes['custom_normal'])
+    final.polygons.foreach_set('use_smooth', [True] * len(final.polygons))
+    final.set_sharp_from_angle(angle=math.radians(38))
+    print(f'F1 faces {full} -> {len(final.polygons)}')
+    mats = {'Physically Based': plain('F1 bottle', '#f0f0ec', 0.45), 'Plastic Red': plain('F1 nozzle red', '#dc2f26', 0.4, 0, 0.3),
+            'Plastic': plain('F1 black plastic', '#141414', 0.45), 'Metal': M['brass'], 'Metal (1)': M['steel']}
+    for nm in names:
+        final.materials.append(mats[nm])
+    body = bpy.data.objects.new('F1 foam cannon', final)
+    body.parent = e
+    COL.objects.link(body)
+
+    # round brand sticker, pressed onto the bottle's plain panel so it follows the taper
+    art = sorted(glob.glob(os.path.join(HERE, '2D assets', 'F1 LabelAsset*.png')))
+    if not art:
+        return
+    radius, zc = F1_LABEL
+    out_n = Vector((math.sin(F1_TURN), -math.cos(F1_TURN), 0.0))        # the way the panel faces
+    side = Vector((-out_n.y, out_n.x, 0.0))                             # to the right as you look at it
+    tree = BVHTree.FromPolygons([v.co.copy() for v in final.vertices], [tuple(p.vertices) for p in final.polygons])
+    RINGS, SEG = 6, 48
+    pts = [(0.0, 0.0)] + [(radius * r / RINGS * math.cos(2 * PI * k / SEG), radius * r / RINGS * math.sin(2 * PI * k / SEG))
+                          for r in range(1, RINGS + 1) for k in range(SEG)]
+    verts = []
+    for u, v in pts:
+        start = out_n * 0.2 + side * u + Vector((0, 0, zc + v))
+        hit = tree.ray_cast(start, -out_n)[0]
+        verts.append((hit if hit else start - out_n * 0.15) + out_n * 0.0007)
+    faces = [(0, 1 + k, 1 + (k + 1) % SEG) for k in range(SEG)]
+    for r in range(RINGS - 1):
+        a, b = 1 + r * SEG, 1 + (r + 1) * SEG
+        faces += [(a + k, b + k, b + (k + 1) % SEG, a + (k + 1) % SEG) for k in range(SEG)]
+    lm = bpy.data.meshes.new('F1 label')
+    lm.from_pydata([tuple(p) for p in verts], [], faces)
+    uvl = lm.uv_layers.new()
+    for lp in lm.loops:
+        u, v = pts[lp.vertex_index]
+        uvl.data[lp.index].uv = (0.5 + 0.496 * u / radius, 0.5 + 0.496 * v / radius)     # just inside the printed circle
+    lm.polygons.foreach_set('use_smooth', [True] * len(lm.polygons))
+    lm.materials.append(label_mat('F1 Label'))
+    lab = bpy.data.objects.new('F1 label', lm)
+    lab.parent = e
+    COL.objects.link(lab)
+
+f1_cannon(f1)
+
 # ---------------------------------------------------------------- architect's lamp on the tool chest
 # A black swing-arm desk lamp aimed at the boxed blower. Lit live like the products (so it
 # shows without a rebake); 'Lamp spot' and 'Lamp aim' tell the browser where its light sits
@@ -1614,6 +1826,10 @@ cams = {
     'cornerin': camera('Cam door-side corner looking in', (-2.05, 1.65, 3.05), 0.413, -0.068),
     'outside': camera('Cam driveway looking in', (0.0, 1.6, 6.6), 0.0, -0.03, 20),
     'boxes': camera('Cam detail bench boxes', (-1.05, 1.35, -1.95), 0.0, -0.2, 30),
+    'f1': camera('Cam detail F1', (-0.55, 1.3, -2.25), -0.22, -0.33, 45),
+    'cannons': camera('Cam bench foam cannons', (-0.75, 1.42, -1.75), -0.2, -0.24, 35),
+    'boar': camera('Cam detail boar brush', (-1.38, 1.9, -2.75), -0.292, -0.127, 60),
+    'boarwide': camera('Cam pegboard brushes', (-1.1, 1.75, -2.2), -0.2, 0.0, 35),
     'towels': camera('Cam detail towels', (-0.2, 1.22, -2.5), 0.0, -0.5, 40),
     'jug': camera('Cam detail jug', (-HW + 0.9, 1.36, -0.80), -1.453, -0.065, 40),
     'jugside': camera('Cam detail jug side', (-HW + 0.6, 1.36, -0.35), -0.705, -0.07, 40),

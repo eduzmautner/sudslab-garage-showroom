@@ -10,7 +10,7 @@ const p = (slot, handle, title, price, image, bullets) => ({
   handle,
   title,
   price,
-  image: CDN + image,
+  image: image.startsWith('https://') ? image : CDN + image,     // older listings keep their pictures under another folder
   url: STORE + handle,
   bullets,
 });
@@ -20,6 +20,9 @@ export const PRODUCTS = [
     ['Twin 18 fl oz chambers', 'Switch soaps with a twist', 'Adjustable foam ratio dial']),
   p('foam-master', 'f5-foam-master', 'F5 Foam Master', '29.99', 'SL-F5001-600-Main-with-Box.jpg',
     ['Hand-pump foam sprayer', 'Three interchangeable nozzles', 'No pressure washer needed']),
+  p('f1-foam-cannon', 'f1-professional-foam-cannon', 'F1 Professional Foam Cannon', '28.31',
+    'https://cdn.shopify.com/s/files/1/0555/5470/3553/products/SL-FC01-main-1-web.jpg',
+    ['Attaches to your pressure washer', 'Adjustable foam control', 'Removes dirt and grime fast']),
   p('towels', 'suds-lab-mt-large-microfiber-drying-towels-18x24-2-pack-car-exterior-cleaning-and-detailing-cloth-safe-on-plastic-trim-glass-carbon-fiber-paint-etc-orange', 'MT Microfiber Drying Towels, 18 x 24 in. (2-Pack)', '24.98', 'SL-2MT01-800_2packoftowels_066a266a-ddd6-432a-989c-47e0ac40ab38.jpg',
     ['Plush microfiber', 'Safe on paint, glass and trim', '2-pack, 18 x 24 in.']),
   p('leather', 'lc-leather-deep-cleaning-leather-cleaner-spray-32-oz', 'LC Leather Deep Cleaning Spray, 32 oz.', '19.99', 'SL-LC032-276W-Main.jpg',

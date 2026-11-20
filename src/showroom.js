@@ -125,7 +125,7 @@ export async function mountShowroom(root, { products }) {
   };
 
   const ui = createUI(root, stage, {
-    products,
+    products: products.filter((p) => hotspots[p.slot]),     // a product with no spot in this garage file gets no dot or card
     onSelect: focusProduct,
     onClose: () => flyTo({ zoom: 1 }, 700),
     onZoom: (dir) => flyTo({ zoom: THREE.MathUtils.clamp(view.zoom * (dir > 0 ? 1.3 : 1 / 1.3), 1, 2.4) }, 350),
