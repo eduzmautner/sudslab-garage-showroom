@@ -43,6 +43,36 @@ const LIQUID = { thickness: 0.08, attenuationDistance: 1.0, clarity: 0.4 };
 // 1 = opaque, 0.5 = half the jug's own colour and half the room behind it.
 const JUG = { opacity: 0.5 };
 
+// A light breeze in the trees and bushes outside. They are one baked mesh, so the motion is
+// done by the graphics card: every point leans with the wind by an amount that grows with
+// its height above the ground (trunks stay planted), and the foliage stirs a little on top.
+// The offset depends only on where a point is, so the faceted shapes never open at a seam.
+//   strength  1 = as tuned, 0.5 = half the movement, 0 = still
+//   loop      seconds until the motion repeats; every rhythm below fits a whole number of
+//             times into it, so the repeat has no jump
+//   fps       how often the picture is redrawn while only the trees are moving
+// Slowing the motion = a longer loop: 37.5 s is the first tuning (30 s) made 20% slower.
+export const BREEZE = { strength: 0.8, loop: 37.5, fps: 30 };
+const BREEZE_GLSL = /* glsl */ `
+uniform float uBreezeTime;      // 0..1 across one loop
+uniform float uBreezeStrength;
+vec3 breeze(vec3 p) {
+  float T = 6.2831853 * uBreezeTime;
+  float h = max(p.y, 0.0);
+  vec2 wind = vec2(0.86, 0.5);                                     // the way the gusts travel (x, z)
+  float along = dot(p.xz, wind);
+  float gust = 0.65 + 0.35 * sin(T * 2.0 - along * 0.11 + 1.0);    // slow swell passing through the yard
+  float sway = sin(T * 7.0 - along * 0.25) * gust;                 // main lean, 7 times per loop (about 5 s back and forth)
+  float cross = 0.35 * sin(T * 5.0 - along * 0.2 + p.x * 0.07 + 2.1);
+  float bend = 0.10 * pow(h / 4.0, 1.5);                           // at strength 1: 10 cm at 4 m up, nothing at the ground
+  vec3 o = vec3(wind.x * sway - wind.y * cross, 0.0, wind.y * sway + wind.x * cross) * bend;
+  float stir = 0.018 * min(h / 1.5, 1.0);                          // leaves: small, quicker, different clump to clump
+  o.x += stir * sin(T * 13.0 + p.x * 1.9 + p.y * 2.3 + p.z * 0.7);
+  o.z += stir * sin(T * 11.0 + p.z * 1.7 - p.y * 2.1 + 1.7);
+  o.y += stir * 0.5 * sin(T * 9.0 + p.x * 1.3 + p.z * 1.5);
+  return o * uBreezeStrength;
+}`;
+
 // Fetches a binary asset. With `packed`, reads `<url>.json` ({ data: base64 }) instead,
 // for hosts that only serve text and image files.
 async function loadBuffer(url, packed) {
@@ -70,11 +100,27 @@ export async function loadGarage(scene, renderer, base, packed = false) {
   env.needsUpdate = true;
 
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
+  let breeze = null;      // set once the trees are found: the two numbers the frame loop drives
   room.scene.traverse((o) => {
     if (!o.isMesh) return;
     const map = o.material.map;
     if (map) map.anisotropy = maxAniso;
     o.material = new THREE.MeshBasicMaterial({ map, toneMapped: false });
+    if (o.name.startsWith('baked_plants')) {
+      breeze = breeze || { time: { value: 0 }, strength: { value: BREEZE.strength } };
+      o.material.onBeforeCompile = (shader) => {
+        shader.uniforms.uBreezeTime = breeze.time;
+        shader.uniforms.uBreezeStrength = breeze.strength;
+        shader.vertexShader = shader.vertexShader
+          .replace('#include <common>', `#include <common>\n${BREEZE_GLSL}`)
+          .replace('#include <project_vertex>', `
+            vec4 breezeWorld = modelMatrix * vec4(transformed, 1.0);
+            breezeWorld.xyz += breeze(breezeWorld.xyz);
+            vec4 mvPosition = viewMatrix * breezeWorld;
+            gl_Position = projectionMatrix * mvPosition;`);
+      };
+      o.material.customProgramCacheKey = () => 'breeze';
+    }
     o.matrixAutoUpdate = false;
     o.castShadow = true;   // the room shades the live sun, so it only lands where the baked sun does
   });
@@ -170,5 +216,5 @@ export async function loadGarage(scene, renderer, base, packed = false) {
   for (const s of slots) {
     hotspots[s.slot] = new THREE.Vector3(s.position[0], s.position[1] + s.hotspotOffsetY, s.position[2]);
   }
-  return { hotspots };
+  return { hotspots, breeze };
 }

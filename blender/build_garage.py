@@ -968,7 +968,11 @@ for i, x in enumerate((-1.35, -0.35, 0.65)):
     cyl(f'Pendant cord {i}', 0.004, 0.004, cord_h, M['black'], p, 0, cord_h / 2 + 0.1, 0, seg=8, bevel=0)
     cyl(f'Pendant shade {i}', 0.035, 0.15, 0.11, M['dark_steel'], p, 0, 0.05, 0, seg=36, bevel=0)
     cyl(f'Pendant socket {i}', 0.025, 0.025, 0.06, M['black'], p, 0, 0.12, 0, seg=16)
+    # The glowing bulb is drawn live, not baked: it is a 6 cm ball that gets only a few
+    # texture pixels per facet on the baked sheet, which came out as a light-and-dark checker.
+    use('Live props')
     sphere(f'Pendant bulb {i}', 0.032, M['bulb'], p, 0, 0.0, 0)
+    use('Lights')
     ld = bpy.data.lights.new(f'Pendant light {i}', 'POINT')
     ld.energy = 6
     ld.color = (1.0, 0.78, 0.55)

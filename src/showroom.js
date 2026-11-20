@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadGarage, EXPOSURE, TONE_MAPPING } from './garage.js';
+import { loadGarage, EXPOSURE, TONE_MAPPING, BREEZE } from './garage.js';
 import { createUI } from './ui.js';
 
 const EYE = 1.5;
@@ -31,9 +31,9 @@ export async function mountShowroom(root, { products }) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(60, 2, 0.05, 80);
   const base = root.dataset.assetBase || `${import.meta.env.BASE_URL}garage/`;
-  let hotspots;
+  let hotspots, breeze;
   try {
-    ({ hotspots } = await loadGarage(scene, renderer, base, 'assetPacked' in root.dataset));
+    ({ hotspots, breeze } = await loadGarage(scene, renderer, base, 'assetPacked' in root.dataset));
   } catch (err) {
     loading.textContent = 'The garage could not be loaded.';
     throw err;
@@ -184,12 +184,21 @@ export async function mountShowroom(root, { products }) {
     invalidate();
   }, { passive: false });
 
-  // ---------- loop (renders only when something changed) ----------
+  // ---------- loop ----------
+  // The view is redrawn when something changed, plus a steady BREEZE.fps for the trees outside.
+  // The breeze stops with everything else when the section is off screen (and the browser
+  // stops calling this at all in a hidden tab), and is left out for visitors who have asked
+  // their device for less motion.
+  const calm = window.matchMedia('(prefers-reduced-motion: reduce)');
+  calm.addEventListener('change', invalidate);
+  let lastSway = 0;
   const proj = new THREE.Vector3();
   const fwd = new THREE.Vector3();
   const frame = (now) => {
     requestAnimationFrame(frame);
     if (!visible) return;
+    const windy = breeze && breeze.strength.value > 0 && !calm.matches;
+    const sway = windy && now - lastSway >= 1000 / BREEZE.fps - 2;      // 2 ms slack: screens tick a hair early or late
     if (tween) {
       const t = Math.min(1, (now - tween.t0) / tween.ms), k = ease(t);
       view.pos.lerpVectors(tween.from.pos, tween.to.pos, k);
@@ -204,11 +213,19 @@ export async function mountShowroom(root, { products }) {
       vel.yaw *= 0.9; vel.pitch *= 0.9;
       dirty = true;
     }
-    if (!dirty) return;
+    if (!dirty && !sway) return;
+    if (windy) {
+      breeze.time.value = ((now / 1000) % BREEZE.loop) / BREEZE.loop;
+      lastSway = now;
+    }
+    const moved = dirty;
     dirty = false;
-    applyCamera();
-    rings.forEach((r, i) => { r.visible = i !== view.wp || !!tween; });
+    if (moved) {
+      applyCamera();
+      rings.forEach((r, i) => { r.visible = i !== view.wp || !!tween; });
+    }
     renderer.render(scene, camera);
+    if (!moved) return;                 // only the trees moved: the hotspots are where they were
     camera.getWorldDirection(fwd);
     const w = stage.clientWidth, h = stage.clientHeight;
     for (const slot in hotspots) {
@@ -224,5 +241,5 @@ export async function mountShowroom(root, { products }) {
   loading.remove();
   root.classList.add('is-ready');
 
-  return { scene, camera, renderer, view, flyTo, goToWaypoint, invalidate, hotspots };
+  return { scene, camera, renderer, view, flyTo, goToWaypoint, invalidate, hotspots, breeze };
 }
