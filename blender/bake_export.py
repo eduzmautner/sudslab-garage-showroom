@@ -13,6 +13,11 @@ Reads blender/garage.blend (never writes back to it) and produces, in public/gar
     env.hdr        a small 360 capture from inside the room, used to light
                    the products in the browser.
     slots.json     product positions for the hotspots.
+    static-lite.glb, products-lite.glb
+                   the same two files with every picture shrunk, for phones and tablets.
+
+--only=hero,walls rebakes just those sheets; --only=none rebakes nothing and only writes
+the files again from the sheets already in textures/.
 
 Baked light is diffuse only (no reflections), and metals are baked as plain
 grey because a view-dependent highlight cannot live in a texture.
@@ -419,4 +424,27 @@ for name, ob, img in baked:
     ob.data.materials.append(mat)
     ob.data.polygons.foreach_set('material_index', [0] * len(ob.data.polygons))
 export_glb(os.path.join(OUT, 'static.glb'), [ob for _, ob, _ in baked], export_image_format='WEBP', export_image_quality=92)
+
+# ---------------------------------------------------------------- 6. light copies for phones and tablets
+# The full set needs about 1.2 GB of graphics memory, nearly all of it textures (a 5472 px
+# sheet is ~150 MB once unpacked), and a phone's browser closes the page long before that.
+# The light set is the same geometry with every picture shrunk: baked sheets to 3/8 of their
+# size (5472 -> 2052 px), product artwork to at most 1024 px on its long side. That is about
+# 200 MB with the smaller shadow map. The viewer picks the set (src/garage.js, pickQuality). Nothing is rebaked for it,
+# and the shrinking happens in memory only: the files in textures/ stay full size.
+LITE_SHEETS, LITE_ARTWORK = 3 / 8, 1024
+for name, ob, img in baked:
+    tex = next(n for n in ob.data.materials[0].node_tree.nodes if n.bl_idname == 'ShaderNodeTexImage').image
+    tex.scale(round(tex.size[0] * LITE_SHEETS), round(tex.size[1] * LITE_SHEETS))
+export_glb(os.path.join(OUT, 'static-lite.glb'), [ob for _, ob, _ in baked], export_image_format='WEBP', export_image_quality=92)
+art = {n.image for o in product_objs if o.type == 'MESH' for m in o.data.materials if m and m.node_tree
+       for n in m.node_tree.nodes if n.bl_idname == 'ShaderNodeTexImage' and n.image}
+art |= {n.image for o in product_objs for s in o.material_slots if s.material and s.material.node_tree
+        for n in s.material.node_tree.nodes if n.bl_idname == 'ShaderNodeTexImage' and n.image}      # per-object materials (the bottles)
+for im in art:
+    w, h = im.size
+    if max(w, h) > LITE_ARTWORK:
+        k = LITE_ARTWORK / max(w, h)
+        im.scale(max(1, round(w * k)), max(1, round(h * k)))
+export_glb(os.path.join(OUT, 'products-lite.glb'), product_objs, export_image_format='WEBP', export_image_quality=85)
 log('done')

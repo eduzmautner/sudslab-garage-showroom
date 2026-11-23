@@ -42,6 +42,7 @@ Exterior, Products, Slots) and the `slot_<id>` empties are kept.
 | `blender/slots.json` | The 18 product positions. Copied to `public/garage/`. |
 | `public/garage/static.glb` | Room, furniture, props, exterior with baked lighting (displayed unlit). |
 | `public/garage/products.glb` | Products with ordinary materials, lit in the browser by `env.hdr`. |
+| `public/garage/static-lite.glb`, `products-lite.glb` | The same two files with every picture shrunk, for phones and tablets. |
 | `src/garage.js` | Loads the files above. |
 | `src/showroom.js` | Renderer, camera (drag-look + floor waypoints), render-on-demand loop. |
 | `src/ui.js`, `src/showroom.css` | Hotspot buttons, product panel, fullscreen/zoom. All CSS scoped under `.sl-showroom`. |
@@ -57,6 +58,21 @@ only (direct + bounced + emission) with the scene exposure and AgX look
 applied, so surfaces have no live reflections and metals are baked as plain
 grey. Products are not baked; they cast baked shadows but are lit live from a
 360 capture of the room.
+
+## Phones and tablets
+
+The full files unpack to about 1.2 GB of graphics memory, nearly all of it
+textures, and a phone's browser closes the page before that. `bake_export.py`
+therefore also writes a light set (baked sheets at 3/8 size, product artwork
+at most 1024 px, about 200 MB in memory), and `pickQuality` in `src/garage.js`
+loads it on touch-only devices, on devices reporting 4 GB of memory or less,
+and on graphics chips that cannot hold a full-size sheet. Add `?garage=lite`
+or `?garage=full` to the address to force one. To write the files again
+without rebaking anything:
+
+```bash
+blender -b --factory-startup -P blender/bake_export.py -- --res=5472 --only=none
+```
 
 ## Not in this repository
 

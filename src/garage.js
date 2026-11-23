@@ -73,6 +73,22 @@ vec3 breeze(vec3 p) {
   return o * uBreezeStrength;
 }`;
 
+// Which set of garage files to load. The full set needs about 1.2 GB of graphics memory,
+// nearly all of it textures, which is more than a phone's browser allows a page: it closes
+// the page partway through loading. 'lite' is the same garage with every picture shrunk
+// (about 200 MB; see step 6 of blender/bake_export.py) and a smaller shadow map.
+// Touch-only devices (phones, tablets), devices that report 4 GB of memory or less, and
+// graphics chips that cannot hold a full-size sheet get 'lite'. To force one for a test, add
+// ?garage=lite or ?garage=full to the address, or set data-quality on the showroom element.
+export function pickQuality(root, renderer) {
+  const asked = new URLSearchParams(window.location.search).get('garage') || root.dataset.quality;
+  if (asked === 'lite' || asked === 'full') return asked;
+  const touchOnly = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  const smallMemory = navigator.deviceMemory !== undefined && navigator.deviceMemory <= 4;
+  const smallSheets = renderer.capabilities.maxTextureSize < 8192;
+  return touchOnly || smallMemory || smallSheets ? 'lite' : 'full';
+}
+
 // Fetches a binary asset. With `packed`, reads `<url>.json` ({ data: base64 }) instead,
 // for hosts that only serve text and image files.
 async function loadBuffer(url, packed) {
@@ -81,13 +97,19 @@ async function loadBuffer(url, packed) {
   return Uint8Array.from(atob(data), (c) => c.charCodeAt(0)).buffer;
 }
 
-export async function loadGarage(scene, renderer, base, packed = false) {
+export async function loadGarage(scene, renderer, base, packed = false, quality = 'full') {
+  const lite = quality === 'lite';
   const draco = new DRACOLoader().setDecoderPath(`${base}draco/`);
   const gltf = new GLTFLoader().setDRACOLoader(draco);
 
+  // a host that has not been given the light files yet falls back to the full ones
+  const model = (name) => {
+    const get = (file) => loadBuffer(`${base}${file}`, packed).then((b) => gltf.parseAsync(b, base));
+    return lite ? get(`${name}-lite.glb`).catch(() => get(`${name}.glb`)) : get(`${name}.glb`);
+  };
   const [room, products, hdr, slots] = await Promise.all([
-    loadBuffer(`${base}static.glb`, packed).then((b) => gltf.parseAsync(b, base)),
-    loadBuffer(`${base}products.glb`, packed).then((b) => gltf.parseAsync(b, base)),
+    model('static'),
+    model('products'),
     loadBuffer(`${base}env.hdr`, packed).then((b) => new RGBELoader().parse(b)),
     fetch(`${base}slots.json`).then((r) => r.json()),
   ]);
@@ -200,7 +222,7 @@ export async function loadGarage(scene, renderer, base, packed = false) {
   const el = THREE.MathUtils.degToRad(SUN.elevation), az = THREE.MathUtils.degToRad(SUN.azimuth);
   sun.position.set(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)).multiplyScalar(20);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(4096, 4096);
+  sun.shadow.mapSize.set(lite ? 2048 : 4096, lite ? 2048 : 4096);
   Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 5, far: 35 });
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.01;

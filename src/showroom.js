@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadGarage, EXPOSURE, TONE_MAPPING, BREEZE } from './garage.js';
+import { loadGarage, pickQuality, EXPOSURE, TONE_MAPPING, BREEZE } from './garage.js';
 import { createUI } from './ui.js';
 
 const EYE = 1.5;
@@ -9,7 +9,7 @@ const WAYPOINTS = [
   { pos: [-0.2, EYE, -1.35], yaw: -0.1, pitch: -0.1 }, // up close at the bench
   { pos: [1.35, EYE, 2.45], yaw: -0.62, pitch: -0.13 }, // by the door, looking in
 ];
-const MAX_PIXELS = 2.6e6; // render budget; the baked scene is cheap, so this is generous
+const MAX_PIXELS = { full: 2.6e6, lite: 1.6e6 }; // render budget; the baked scene is cheap, so this is generous
 const H_FOV = 96; // target horizontal field of view, degrees
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
@@ -31,9 +31,20 @@ export async function mountShowroom(root, { products }) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(60, 2, 0.05, 80);
   const base = root.dataset.assetBase || `${import.meta.env.BASE_URL}garage/`;
+  const quality = pickQuality(root, renderer);
+  root.dataset.qualityUsed = quality;
+  // If the device still runs out of graphics memory, say so instead of leaving a blank box.
+  renderer.domElement.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    root.classList.remove('is-ready');
+    const note = document.createElement('div');
+    note.className = 'sl-loading';
+    note.textContent = 'The garage ran out of graphics memory on this device. Reload the page to try again.';
+    root.appendChild(note);
+  });
   let hotspots, breeze;
   try {
-    ({ hotspots, breeze } = await loadGarage(scene, renderer, base, 'assetPacked' in root.dataset));
+    ({ hotspots, breeze } = await loadGarage(scene, renderer, base, 'assetPacked' in root.dataset, quality));
   } catch (err) {
     loading.textContent = 'The garage could not be loaded.';
     throw err;
@@ -76,7 +87,7 @@ export async function mountShowroom(root, { products }) {
     const w = stage.clientWidth, h = stage.clientHeight;
     if (!w || !h) return;
     // Cap the rendered pixel count so a fullscreen 4K/retina canvas stays smooth.
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2, Math.sqrt(MAX_PIXELS / (w * h))));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2, Math.sqrt(MAX_PIXELS[quality] / (w * h))));
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     invalidate();
@@ -241,5 +252,5 @@ export async function mountShowroom(root, { products }) {
   loading.remove();
   root.classList.add('is-ready');
 
-  return { scene, camera, renderer, view, flyTo, goToWaypoint, invalidate, hotspots, breeze };
+  return { scene, camera, renderer, view, flyTo, goToWaypoint, invalidate, hotspots, breeze, quality };
 }
